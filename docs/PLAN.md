@@ -3,10 +3,10 @@
 | 项目 | 当前值 |
 |---|---|
 | 设计基线 | 3.2（薄包装器） |
-| 实现版本 | v0.2 |
+| 实现版本 | Unreleased（待发布） |
 | 项目状态 | 本地实现与验证完成，尚未发布 |
 | 最后验证 | 2026-09-03 |
-| Git 状态 | GitHub `origin/main`；无 CI |
+| Git 状态 | GitHub `origin/main`；发布流水线已配置，尚未触发 |
 | 本地工具 | Git 2.55.0；Go 1.26.8 |
 
 本文件是项目进度、验收状态和发布门槛的唯一来源。产品边界见 [DESIGN.md](DESIGN.md)，可观察行为见 [SPEC.md](SPEC.md)。
@@ -20,10 +20,12 @@
 - 一个可提交但必须由 local config 显式启用的 `.githooks/` 示例。
 - 仅依赖 Go 标准库和系统 Git 的本地 CLI。
 - 单元测试和使用独立临时 repository 的集成测试。
-- README、设计、行为规范和自动化开发约束。
+- 根目录用户 README、`docs/` 文档索引、设计、行为规范、项目状态和背景资料。
+- 根目录自动化开发约束。
 - MIT `LICENSE`，Copyright (c) 2026 gongshuiwen。
+- Tag 驱动的 GitHub Actions 发布流水线；发布前执行 test、race test 和 vet，并构建四个平台压缩包及 SHA-256 校验文件。
 
-Canonical repository 是 `https://github.com/gongshuiwen/gwm`，Go module path 是 `github.com/gongshuiwen/gwm`。当前没有 CI、版本标签、发布渠道或发布制品。
+Canonical repository 是 `https://github.com/gongshuiwen/gwm`，Go module path 是 `github.com/gongshuiwen/gwm`。GitHub Releases 已选为发布渠道；当前没有版本标签或发布制品。
 
 ## 2. 已完成里程碑
 
@@ -67,7 +69,7 @@ Canonical repository 是 `https://github.com/gongshuiwen/gwm`，Go module path �
 ### 阶段 3：CLI 自描述
 
 - [x] 实现 `gwm --help` 和五个 `gwm <command> --help`。
-- [x] 实现固定输出 `gwm v0.2` 的 `gwm --version`。
+- [x] 实现 `gwm --version`；普通源码构建输出 `gwm unreleased`，发布构建由 tag 注入版本。
 - [x] 保证 help/version 不发现 repository、不运行 Git 或 Hook。
 - [x] 覆盖 stdout、退出码、无 repository 和非法组合。
 
@@ -92,7 +94,7 @@ go build ./cmd/gwm
 - 五个业务命令、两个信息 flag、三个 metadata 字段、四个 Hook 和四个实施阶段一致。
 - README、DESIGN、SPEC、PLAN、AGENTS 之间没有规范循环定义。
 
-修改型集成测试必须创建并独占临时 repository，不访问网络、不创建 remote，也不执行用户机器上的真实 GWM Hook。具体约束见 [AGENTS.md](AGENTS.md)。
+修改型集成测试必须创建并独占临时 repository，不访问网络、不创建 remote，也不执行用户机器上的真实 GWM Hook。具体约束见 [AGENTS.md](../AGENTS.md)。
 
 ### 最近一次本地验证
 
@@ -105,6 +107,7 @@ go build ./cmd/gwm
 - [x] 临时 CLI 构建
 - [x] Help/version 在 non-repository 目录运行
 - [x] 文档链接、JSON、围栏、术语和范围一致性检查
+- [x] Linux/macOS 的 amd64/arm64 发布压缩包与 SHA-256 校验文件本地构建
 
 macOS 13+ 和最低支持版本组合尚未完成发布级验证。
 
@@ -113,10 +116,20 @@ macOS 13+ 和最低支持版本组合尚未完成发布级验证。
 - [x] 确认 canonical repository URL：`https://github.com/gongshuiwen/gwm`。
 - [x] 确认最终 Go module path：`github.com/gongshuiwen/gwm`。
 - [x] 选择并添加 MIT 许可证。
+- [x] 确认 CI：GitHub Actions tag 流水线执行 test、race test 和 vet。
+- [x] 确认发布渠道：GitHub Releases。
+- [x] 确认版本标记：稳定 SemVer tag `vMAJOR.MINOR.PATCH` 是唯一发布版本，并注入发布二进制。
+- [x] 确认发布授权：只有显式 push release tag 才能触发，不提供 branch、pull request 或手动发布入口。
 - [ ] 在 Linux 和 macOS 13+ 上验证最低与当前 Git/Go 组合。
-- [ ] 确认 CI、发布渠道、版本标记和发布授权。
+- [ ] 确定首次发布版本号并完成人工发布决策。
 
-这些事项不阻塞本地开发，但在全部完成前不得将 v0.2 表述为正式发布，也不授权创建 remote、CI 或发布制品。
+这些事项不阻塞本地开发。当前项目统一标记为 Unreleased，不预设首次发布版本号；发布流水线配置不等于创建 tag 或 Release，首次发布仍需独立的人工决策。
+
+### 发布流水线
+
+`.github/workflows/release.yml` 在 push 稳定 SemVer tag 时运行。它使用 `go.mod` 的 Go 版本完成质量门槛，将 tag 注入二进制，交叉构建 Linux/macOS 的 amd64/arm64 压缩包，验证发布版本，生成 `checksums.txt`，然后通过 GitHub CLI 为现有 tag 创建带自动 release notes 的 GitHub Release。
+
+Workflow 使用完整 commit SHA 固定 GitHub 官方 Action，不引入第三方 release Action。发布 job 的权限限于 `contents: write`，checkout 不持久化 credential，`GITHUB_TOKEN` 只注入最终发布步骤。流水线本身不满足尚未完成的 macOS 与最低版本发布级验证。
 
 ## 5. 变更流程
 
@@ -126,4 +139,4 @@ macOS 13+ 和最低支持版本组合尚未完成发布级验证。
 4. 更新 README 的用户入口和 PLAN 的验收状态。
 5. 运行本文件定义的质量门槛。
 
-README 只提供概览和使用入口；AGENTS 只约束自动化开发动作，两者不创建产品规范。
+根目录 [README](../README.md) 只提供概览和使用入口；[AGENTS.md](../AGENTS.md) 只约束自动化开发动作，两者不创建产品规范。完整文档导航见 [README.md](README.md)。

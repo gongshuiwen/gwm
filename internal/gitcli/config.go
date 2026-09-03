@@ -8,7 +8,7 @@ import (
 
 // ConfigValues reads all values for a key using NUL delimiters. Missing is
 // distinct from a Git failure because metadata absence is a normal state.
-func ConfigValues(ctx context.Context, runner Runner, root, scope, key string, canonicalBool bool) (values []string, missing bool, err error) {
+func ConfigValues(ctx context.Context, runner Runner, root, scope, key string, canonicalBool bool) ([]string, bool, error) {
 	args := []string{"-C", root, "config", scope, "--null"}
 	if canonicalBool {
 		args = append(args, "--bool")
@@ -24,6 +24,7 @@ func ConfigValues(ctx context.Context, runner Runner, root, scope, key string, c
 	return nil, false, ResultError("read git config "+key, result)
 }
 
+// ResultError adds operation context to a failed Git process result.
 func ResultError(action string, result Result) error {
 	detail := strings.TrimSpace(string(result.Stderr))
 	if detail == "" && result.Err != nil {

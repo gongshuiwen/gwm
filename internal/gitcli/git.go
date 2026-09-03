@@ -1,3 +1,4 @@
+// Package gitcli invokes Git with a fixed argument and environment boundary.
 package gitcli
 
 import (
@@ -17,6 +18,7 @@ type Result struct {
 	Err      error
 }
 
+// Success reports whether Git started and exited with status zero.
 func (r Result) Success() bool {
 	return r.Err == nil && r.ExitCode == 0
 }
@@ -26,15 +28,18 @@ type Runner interface {
 	Run(context.Context, ...string) Result
 }
 
+// CommandRunner invokes Git directly without a shell.
 type CommandRunner struct {
 	Path string
 	Env  []string
 }
 
+// New creates a CommandRunner with a sanitized copy of the process environment.
 func New() *CommandRunner {
 	return &CommandRunner{Path: "git", Env: CleanEnv(os.Environ())}
 }
 
+// Run invokes Git with the supplied argument array and captures its result.
 func (r *CommandRunner) Run(ctx context.Context, args ...string) Result {
 	path := r.Path
 	if path == "" {

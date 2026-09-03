@@ -1,8 +1,6 @@
 package app
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestParseWorktrees(t *testing.T) {
 	data := []byte("worktree /repo\x00HEAD abc\x00branch refs/heads/main\x00\x00" +

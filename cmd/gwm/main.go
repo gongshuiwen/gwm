@@ -1,3 +1,4 @@
+// Command gwm provides the GWM command-line interface.
 package main
 
 import (

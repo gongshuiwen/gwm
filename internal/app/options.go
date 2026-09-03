@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -38,7 +39,7 @@ func parseAdd(args []string) (addOptions, error) {
 		switch arg {
 		case "-b":
 			if options.NewBranchProvided {
-				return options, fmt.Errorf("-b may be provided only once")
+				return options, errors.New("-b may be provided only once")
 			}
 			value, next, err := optionValue(args, i, "-b")
 			if err != nil {
@@ -47,12 +48,12 @@ func parseAdd(args []string) (addOptions, error) {
 			options.NewBranch, options.NewBranchProvided, i = value, true, next
 		case "--detach":
 			if options.Detach {
-				return options, fmt.Errorf("--detach may be provided only once")
+				return options, errors.New("--detach may be provided only once")
 			}
 			options.Detach = true
 		case "--from":
 			if options.FromProvided {
-				return options, fmt.Errorf("--from may be provided only once")
+				return options, errors.New("--from may be provided only once")
 			}
 			value, next, err := optionValue(args, i, "--from")
 			if err != nil {
@@ -61,7 +62,7 @@ func parseAdd(args []string) (addOptions, error) {
 			options.From, options.FromProvided, i = value, true, next
 		case "--description":
 			if options.DescriptionProvided {
-				return options, fmt.Errorf("--description may be provided only once")
+				return options, errors.New("--description may be provided only once")
 			}
 			value, next, err := optionValue(args, i, "--description")
 			if err != nil {
@@ -70,7 +71,7 @@ func parseAdd(args []string) (addOptions, error) {
 			options.Description, options.DescriptionProvided, i = value, true, next
 		case "--protected":
 			if options.Protected {
-				return options, fmt.Errorf("--protected may be provided only once")
+				return options, errors.New("--protected may be provided only once")
 			}
 			options.Protected = true
 		default:
@@ -79,16 +80,16 @@ func parseAdd(args []string) (addOptions, error) {
 			}
 			positionals++
 			if positionals > 1 {
-				return options, fmt.Errorf("add accepts exactly one path")
+				return options, errors.New("add accepts exactly one path")
 			}
 			options.Path = arg
 		}
 	}
 	if positionals != 1 {
-		return options, fmt.Errorf("add requires one path")
+		return options, errors.New("add requires one path")
 	}
 	if options.NewBranchProvided && options.Detach {
-		return options, fmt.Errorf("-b and --detach are mutually exclusive")
+		return options, errors.New("-b and --detach are mutually exclusive")
 	}
 	if err := validatePath(options.Path); err != nil {
 		return options, err
@@ -104,7 +105,7 @@ func parseMeta(args []string) (metaOptions, error) {
 		switch arg {
 		case "--description":
 			if options.DescriptionProvided {
-				return options, fmt.Errorf("--description may be provided only once")
+				return options, errors.New("--description may be provided only once")
 			}
 			value, next, err := optionValue(args, i, "--description")
 			if err != nil {
@@ -113,7 +114,7 @@ func parseMeta(args []string) (metaOptions, error) {
 			options.Description, options.DescriptionProvided, i = value, true, next
 		case "--protected":
 			if options.ProtectedProvided {
-				return options, fmt.Errorf("--protected may be provided only once")
+				return options, errors.New("--protected may be provided only once")
 			}
 			value, next, err := optionValue(args, i, "--protected")
 			if err != nil {
@@ -125,7 +126,7 @@ func parseMeta(args []string) (metaOptions, error) {
 			case "false":
 				options.Protected = false
 			default:
-				return options, fmt.Errorf("--protected must be true or false")
+				return options, errors.New("--protected must be true or false")
 			}
 			options.ProtectedProvided, i = true, next
 		default:
@@ -134,13 +135,13 @@ func parseMeta(args []string) (metaOptions, error) {
 			}
 			positionals++
 			if positionals > 1 {
-				return options, fmt.Errorf("meta accepts exactly one path")
+				return options, errors.New("meta accepts exactly one path")
 			}
 			options.Path = arg
 		}
 	}
 	if positionals != 1 {
-		return options, fmt.Errorf("meta requires one path")
+		return options, errors.New("meta requires one path")
 	}
 	if err := validatePath(options.Path); err != nil {
 		return options, err
@@ -155,7 +156,7 @@ func parseRemove(args []string) (removeOptions, error) {
 		switch arg {
 		case "--force":
 			if options.Force {
-				return options, fmt.Errorf("--force may be provided only once")
+				return options, errors.New("--force may be provided only once")
 			}
 			options.Force = true
 		default:
@@ -164,13 +165,13 @@ func parseRemove(args []string) (removeOptions, error) {
 			}
 			positionals++
 			if positionals > 1 {
-				return options, fmt.Errorf("remove accepts exactly one path")
+				return options, errors.New("remove accepts exactly one path")
 			}
 			options.Path = arg
 		}
 	}
 	if positionals != 1 {
-		return options, fmt.Errorf("remove requires one path")
+		return options, errors.New("remove requires one path")
 	}
 	if err := validatePath(options.Path); err != nil {
 		return options, err
@@ -191,7 +192,7 @@ func optionValue(args []string, index int, name string) (string, int, error) {
 
 func validatePath(path string) error {
 	if path == "" || !validText(path) {
-		return fmt.Errorf("path must be non-empty valid UTF-8 without NUL")
+		return errors.New("path must be non-empty valid UTF-8 without NUL")
 	}
 	return nil
 }

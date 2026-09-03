@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, build, and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GOFLAGS: -mod=readonly
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release tag must be a stable semantic version: vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+
+      - name: Verify source
+        run: |
+          go test -count=1 ./...
+          go test -race -count=1 ./...
+          go vet ./...
+
+      - name: Build release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          ldflags="-X github.com/gongshuiwen/gwm/internal/app.version=${GITHUB_REF_NAME}"
+          mkdir -p dist staging
+
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            package="gwm_${version}_${goos}_${goarch}"
+            package_dir="staging/${package}"
+
+            mkdir -p "${package_dir}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+              go build -trimpath -ldflags "${ldflags}" -o "${package_dir}/gwm" ./cmd/gwm
+            cp README.md LICENSE "${package_dir}/"
+            tar -C staging -czf "dist/${package}.tar.gz" "${package}"
+          done
+
+          actual="$(staging/gwm_${version}_linux_amd64/gwm --version)"
+          expected="gwm ${GITHUB_REF_NAME}"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "release binary version ${actual} does not match tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          (
+            cd dist
+            sha256sum ./*.tar.gz > checksums.txt
+          )
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz \
+            dist/checksums.txt \
+            --verify-tag \
+            --generate-notes \
+            --title "GWM ${GITHUB_REF_NAME}"

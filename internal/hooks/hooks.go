@@ -1,3 +1,4 @@
+// Package hooks resolves and executes repository-local GWM lifecycle hooks.
 package hooks
 
 import (
@@ -15,13 +16,15 @@ import (
 )
 
 const (
-	SchemaVersion = 2
-	PreAdd        = "pre-add"
-	PostAdd       = "post-add"
-	PreRemove     = "pre-remove"
-	PostRemove    = "post-remove"
+	SchemaVersion    = 2
+	PreAdd           = "pre-add"
+	PostAdd          = "post-add"
+	PreRemove        = "pre-remove"
+	PostRemove       = "post-remove"
+	hookConfigPrefix = "gwm.hooks."
 )
 
+// Options contains the command options exposed to lifecycle hooks.
 type Options struct {
 	NewBranch *string `json:"new_branch"`
 	From      *string `json:"from"`
@@ -29,6 +32,7 @@ type Options struct {
 	Force     bool    `json:"force"`
 }
 
+// Payload is the schema written to a lifecycle hook's standard input.
 type Payload struct {
 	SchemaVersion  int            `json:"schema_version"`
 	Event          string         `json:"event"`
@@ -41,18 +45,22 @@ type Payload struct {
 	Options        Options        `json:"options"`
 }
 
+// Executor runs one configured lifecycle hook.
 type Executor interface {
 	Run(context.Context, string, string, Payload, io.Writer, io.Writer) error
 }
 
+// CommandExecutor invokes hook executables directly without a shell.
 type CommandExecutor struct {
 	Env []string
 }
 
+// NewExecutor creates an executor with a sanitized process environment.
 func NewExecutor() *CommandExecutor {
 	return &CommandExecutor{Env: gitcli.CleanEnv(os.Environ())}
 }
 
+// Run encodes payload as JSON and invokes one hook executable.
 func (e *CommandExecutor) Run(ctx context.Context, path, dir string, payload Payload, stdout, stderr io.Writer) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -78,7 +86,7 @@ func ConfiguredPath(ctx context.Context, runner gitcli.Runner, mainRoot, event s
 	if !validEvent(event) {
 		return "", false, fmt.Errorf("unknown hook event %q", event)
 	}
-	key := "gwm.hooks." + event
+	key := hookConfigPrefix + event
 	values, missing, err := gitcli.ConfigValues(ctx, runner, mainRoot, "--local", key, false)
 	if err != nil {
 		return "", false, err

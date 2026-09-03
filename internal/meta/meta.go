@@ -1,7 +1,9 @@
+// Package meta reads and writes GWM-owned worktree metadata.
 package meta
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ const (
 	createdAtKey   = "gwm.worktree.created-at"
 )
 
+// Metadata contains the GWM-owned values stored in worktree-scoped Git config.
 type Metadata struct {
 	Description      *string `json:"description"`
 	Protected        bool    `json:"protected"`
@@ -27,20 +30,22 @@ type Metadata struct {
 	CreatedAtInvalid bool    `json:"-"`
 }
 
+// Validate checks the editable metadata fields.
 func Validate(value Metadata) error {
 	if value.Description == nil {
 		return nil
 	}
 	description := *value.Description
 	if !utf8.ValidString(description) || strings.ContainsRune(description, '\x00') {
-		return fmt.Errorf("description must be valid UTF-8 without NUL")
+		return errors.New("description must be valid UTF-8 without NUL")
 	}
-	if len([]byte(description)) > maxDescriptionBytes {
-		return fmt.Errorf("description exceeds 4096 UTF-8 bytes")
+	if len(description) > maxDescriptionBytes {
+		return fmt.Errorf("description exceeds %d UTF-8 bytes", maxDescriptionBytes)
 	}
 	return nil
 }
 
+// Read loads and validates metadata from one worktree.
 func Read(ctx context.Context, runner gitcli.Runner, worktreePath string) (Metadata, error) {
 	var metadata Metadata
 	descriptions, descriptionMissing, err := gitcli.ConfigValues(ctx, runner, worktreePath, "--worktree", descriptionKey, false)
@@ -80,6 +85,7 @@ func Read(ctx context.Context, runner gitcli.Runner, worktreePath string) (Metad
 	return metadata, nil
 }
 
+// Write updates editable metadata and verifies the resulting values.
 func Write(ctx context.Context, runner gitcli.Runner, worktreePath string, intended Metadata) error {
 	if intended.Description != nil && *intended.Description == "" {
 		intended.Description = nil
@@ -113,14 +119,15 @@ func Write(ctx context.Context, runner gitcli.Runner, worktreePath string, inten
 		return fmt.Errorf("verify worktree metadata: %w", readErr)
 	}
 	if !EqualEditable(after, intended) {
-		return fmt.Errorf("worktree metadata did not match the intended value after write")
+		return errors.New("worktree metadata did not match the intended value after write")
 	}
 	return nil
 }
 
+// WriteCreatedAt stores and verifies the creation timestamp written by add.
 func WriteCreatedAt(ctx context.Context, runner gitcli.Runner, worktreePath, intended string) error {
 	if !validCreatedAt(intended) {
-		return fmt.Errorf("created-at must be a UTC RFC 3339 timestamp with second precision")
+		return errors.New("created-at must be a UTC RFC 3339 timestamp with second precision")
 	}
 	result := runner.Run(ctx, "-C", worktreePath, "config", "--worktree", "--replace-all", createdAtKey, intended)
 	if !result.Success() {
@@ -136,6 +143,7 @@ func WriteCreatedAt(ctx context.Context, runner gitcli.Runner, worktreePath, int
 	return nil
 }
 
+// EqualEditable reports whether description and protection values are equal.
 func EqualEditable(left, right Metadata) bool {
 	if left.Protected != right.Protected {
 		return false
@@ -146,6 +154,7 @@ func EqualEditable(left, right Metadata) bool {
 	return *left.Description == *right.Description
 }
 
+// FormatCreatedAt returns the canonical timestamp representation.
 func FormatCreatedAt(value time.Time) string {
 	return value.UTC().Truncate(time.Second).Format(createdAtLayout)
 }
@@ -170,10 +179,11 @@ func validCreatedAt(value string) bool {
 	return err == nil && parsed.UTC().Format(createdAtLayout) == value
 }
 
-func Pointer(value string) *string {
+// DescriptionPointer converts the external empty-string representation to
+// the nil representation used by Metadata.
+func DescriptionPointer(value string) *string {
 	if value == "" {
 		return nil
 	}
-	copy := value
-	return &copy
+	return &value
 }

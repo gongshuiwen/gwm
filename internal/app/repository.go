@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,14 +13,14 @@ import (
 	"github.com/gongshuiwen/gwm/internal/gitcli"
 )
 
-type Repository struct {
+type repositoryContext struct {
 	Root      string
 	MainRoot  string
 	CommonDir string
 	Git       gitcli.Runner
 }
 
-type Worktree struct {
+type worktree struct {
 	Path     string
 	Head     string
 	Branch   string
@@ -29,7 +30,7 @@ type Worktree struct {
 	Locked   bool
 }
 
-func Discover(ctx context.Context, runner gitcli.Runner, start string) (*Repository, error) {
+func discover(ctx context.Context, runner gitcli.Runner, start string) (*repositoryContext, error) {
 	if err := requireGitVersion(ctx, runner); err != nil {
 		return nil, err
 	}
@@ -46,7 +47,7 @@ func Discover(ctx context.Context, runner gitcli.Runner, start string) (*Reposit
 	}
 	root := strings.TrimSpace(string(rootResult.Stdout))
 	if !utf8.ValidString(root) || root == "" {
-		return nil, fmt.Errorf("repository root is not valid UTF-8")
+		return nil, errors.New("repository root is not valid UTF-8")
 	}
 	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
 		root = resolved
@@ -57,7 +58,7 @@ func Discover(ctx context.Context, runner gitcli.Runner, start string) (*Reposit
 	}
 	commonDir := strings.TrimSpace(string(commonResult.Stdout))
 	if !utf8.ValidString(commonDir) || commonDir == "" {
-		return nil, fmt.Errorf("common directory is not valid UTF-8")
+		return nil, errors.New("common directory is not valid UTF-8")
 	}
 	commonDir = filepath.Clean(commonDir)
 	bareResult := runner.Run(ctx, "-C", root, "rev-parse", "--is-bare-repository")
@@ -66,15 +67,15 @@ func Discover(ctx context.Context, runner gitcli.Runner, start string) (*Reposit
 	}
 	bare, err := strconv.ParseBool(strings.TrimSpace(string(bareResult.Stdout)))
 	if err != nil || bare {
-		return nil, fmt.Errorf("GWM supports only ordinary non-bare repositories")
+		return nil, errors.New("GWM supports only ordinary non-bare repositories")
 	}
-	repository := &Repository{Root: filepath.Clean(root), CommonDir: commonDir, Git: runner}
+	repository := &repositoryContext{Root: filepath.Clean(root), CommonDir: commonDir, Git: runner}
 	worktrees, err := repository.worktreesAt(ctx, repository.Root)
 	if err != nil {
 		return nil, err
 	}
 	if len(worktrees) == 0 || worktrees[0].Path == "" {
-		return nil, fmt.Errorf("repository has no main worktree")
+		return nil, errors.New("repository has no main worktree")
 	}
 	repository.MainRoot = worktrees[0].Path
 	return repository, nil
@@ -90,31 +91,31 @@ func requireGitVersion(ctx context.Context, runner gitcli.Runner) error {
 		return fmt.Errorf("cannot parse Git version %q", strings.TrimSpace(string(result.Stdout)))
 	}
 	if major < 2 || (major == 2 && minor < 39) {
-		return fmt.Errorf("Git 2.39 or newer is required")
+		return errors.New("Git 2.39 or newer is required")
 	}
 	return nil
 }
 
-func (r *Repository) Run(ctx context.Context, args ...string) gitcli.Result {
+func (r *repositoryContext) run(ctx context.Context, args ...string) gitcli.Result {
 	return r.runAt(ctx, r.Root, args...)
 }
 
-func (r *Repository) RunCommon(ctx context.Context, args ...string) gitcli.Result {
+func (r *repositoryContext) runCommon(ctx context.Context, args ...string) gitcli.Result {
 	return r.runAt(ctx, r.MainRoot, args...)
 }
 
-func (r *Repository) runAt(ctx context.Context, root string, args ...string) gitcli.Result {
+func (r *repositoryContext) runAt(ctx context.Context, root string, args ...string) gitcli.Result {
 	full := make([]string, 0, len(args)+2)
 	full = append(full, "-C", root)
 	full = append(full, args...)
 	return r.Git.Run(ctx, full...)
 }
 
-func (r *Repository) Worktrees(ctx context.Context) ([]Worktree, error) {
+func (r *repositoryContext) worktrees(ctx context.Context) ([]worktree, error) {
 	return r.worktreesAt(ctx, r.MainRoot)
 }
 
-func (r *Repository) worktreesAt(ctx context.Context, root string) ([]Worktree, error) {
+func (r *repositoryContext) worktreesAt(ctx context.Context, root string) ([]worktree, error) {
 	result := r.runAt(ctx, root, "worktree", "list", "--porcelain", "-z")
 	if !result.Success() {
 		return nil, gitcli.ResultError("list worktrees", result)
@@ -122,19 +123,19 @@ func (r *Repository) worktreesAt(ctx context.Context, root string) ([]Worktree, 
 	return parseWorktrees(result.Stdout)
 }
 
-func parseWorktrees(data []byte) ([]Worktree, error) {
+func parseWorktrees(data []byte) ([]worktree, error) {
 	if !utf8.Valid(data) {
-		return nil, fmt.Errorf("worktree list contains non-UTF-8 paths or attributes")
+		return nil, errors.New("worktree list contains non-UTF-8 paths or attributes")
 	}
 	parts := strings.Split(string(data), "\x00")
-	worktrees := make([]Worktree, 0)
-	var current *Worktree
+	worktrees := make([]worktree, 0)
+	var current *worktree
 	flush := func() error {
 		if current == nil {
 			return nil
 		}
 		if current.Path == "" {
-			return fmt.Errorf("worktree record has no path")
+			return errors.New("worktree record has no path")
 		}
 		current.IsMain = len(worktrees) == 0
 		worktrees = append(worktrees, *current)
@@ -154,9 +155,9 @@ func parseWorktrees(data []byte) ([]Worktree, error) {
 				return nil, err
 			}
 			if !hasValue || value == "" {
-				return nil, fmt.Errorf("worktree attribute has no path")
+				return nil, errors.New("worktree attribute has no path")
 			}
-			current = &Worktree{Path: filepath.Clean(value)}
+			current = &worktree{Path: filepath.Clean(value)}
 			continue
 		}
 		if current == nil {
@@ -181,19 +182,19 @@ func parseWorktrees(data []byte) ([]Worktree, error) {
 	return worktrees, nil
 }
 
-func findWorktree(worktrees []Worktree, path string) (Worktree, bool) {
+func findWorktree(worktrees []worktree, path string) (worktree, bool) {
 	clean := filepath.Clean(path)
 	for _, worktree := range worktrees {
 		if filepath.Clean(worktree.Path) == clean {
 			return worktree, true
 		}
 	}
-	return Worktree{}, false
+	return worktree{}, false
 }
 
 func normalizeWorktreePath(base, input string) (string, error) {
 	if input == "" || !utf8.ValidString(input) || strings.ContainsRune(input, '\x00') {
-		return "", fmt.Errorf("worktree path must be non-empty UTF-8 without NUL")
+		return "", errors.New("worktree path must be non-empty UTF-8 without NUL")
 	}
 	path := input
 	if !filepath.IsAbs(path) {
@@ -211,7 +212,7 @@ func normalizeWorktreePath(base, input string) (string, error) {
 	resolvedParent, err := filepath.EvalSymlinks(filepath.Clean(parent))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("worktree parent directory does not exist")
+			return "", errors.New("worktree parent directory does not exist")
 		}
 		return "", fmt.Errorf("resolve worktree parent: %w", err)
 	}

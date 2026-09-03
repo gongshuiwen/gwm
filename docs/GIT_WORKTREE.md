@@ -6,7 +6,7 @@
 | 覆盖版本 | Git 2.5–2.55 |
 | 最后核对 | 2026-09-03 |
 
-本文总结原生 `git worktree` 的数据模型、当前功能、自动化接口和主要版本演进。GWM 的产品边界以 [DESIGN.md](DESIGN.md) 为准，可观察行为以 [SPEC.md](SPEC.md) 为准；本文中的历史信息不扩大 GWM v0.2 的范围。
+本文总结原生 `git worktree` 的数据模型、当前功能、自动化接口和主要版本演进。GWM 的产品边界以 [DESIGN.md](DESIGN.md) 为准，可观察行为以 [SPEC.md](SPEC.md) 为准；本文中的历史信息不扩大 GWM 当前待发布版本的范围。完整文档导航见 [README.md](README.md)。
 
 ## 1. 核心模型
 
@@ -209,16 +209,16 @@ git config worktree.useRelativePaths true
 
 ## 7. GWM 兼容性结论
 
-| 原生能力 | 首个 Git 版本 | 与 GWM v0.2 的关系 |
+| 原生能力 | 首个 Git 版本 | 与 GWM 当前待发布版本的关系 |
 |---|---:|---|
 | `git worktree remove` | 2.17 | `gwm remove` 的原生基础 |
 | `git config --worktree` | 2.20 | 三个 metadata 字段的存储基础 |
 | `git worktree repair` | 2.29 | GWM 不包装；用户可直接调用 Git |
 | `git worktree list --porcelain -z` | 2.36 | GWM 固定使用的清单协议 |
-| `git worktree add --orphan` | 2.42 | GWM v0.2 不包装 |
+| `git worktree add --orphan` | 2.42 | GWM 当前待发布版本不包装 |
 | relative worktree linkage | 2.48 | GWM 不提供开关，但不能假设内部链接是绝对路径 |
 
-GWM 当前声明 Git 2.39+，覆盖 v0.2 实际使用的 `remove`、worktree config 和 NUL-delimited list 能力。Git 2.48 的 relative worktree 是额外的 repository 格式边界：使用该格式的仓库必须由 Git 2.48+ 访问，无论上层是否使用 GWM。
+GWM 当前声明 Git 2.39+，覆盖当前实现实际使用的 `remove`、worktree config 和 NUL-delimited list 能力。Git 2.48 的 relative worktree 是额外的 repository 格式边界：使用该格式的仓库必须由 Git 2.48+ 访问，无论上层是否使用 GWM。
 
 实现或测试 GWM 时应保持以下原则：
 

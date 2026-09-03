@@ -18,8 +18,8 @@ func TestHelpAndVersionDoNotDiscoverRepository(t *testing.T) {
 		exact bool
 	}{
 		{name: "root help", args: []string{"--help"}, want: "commands:"},
-		{name: "version", args: []string{"--version"}, want: "gwm v0.2\n", exact: true},
-		{name: "version after C", args: []string{"-C", "does-not-exist", "--version"}, want: "gwm v0.2\n", exact: true},
+		{name: "version", args: []string{"--version"}, want: "gwm unreleased\n", exact: true},
+		{name: "version after C", args: []string{"-C", "does-not-exist", "--version"}, want: "gwm unreleased\n", exact: true},
 		{name: "init help", args: []string{"init", "--help"}, want: "extensions"},
 		{name: "list help", args: []string{"list", "--help"}, want: "creation metadata"},
 		{name: "add help", args: []string{"add", "--help"}, want: "--description"},
@@ -32,13 +32,13 @@ func TestHelpAndVersionDoNotDiscoverRepository(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			application := &App{
-				Git:      runner,
-				Hooks:    hooks.NewExecutor(),
-				Out:      &stdout,
-				Err:      &stderr,
-				StartDir: t.TempDir(),
+				git:      runner,
+				hooks:    hooks.NewExecutor(),
+				stdout:   &stdout,
+				stderr:   &stderr,
+				startDir: t.TempDir(),
 			}
-			if exitCode := application.Run(context.Background(), test.args); exitCode != 0 {
+			if exitCode := application.Run(t.Context(), test.args); exitCode != 0 {
 				t.Fatalf("Run() exit = %d, stderr = %q", exitCode, stderr.String())
 			}
 			if test.exact && stdout.String() != test.want {
@@ -69,13 +69,13 @@ func TestInvalidHelpAndVersionCombinationsAreUsageErrors(t *testing.T) {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		application := &App{
-			Git:      runner,
-			Hooks:    hooks.NewExecutor(),
-			Out:      &stdout,
-			Err:      &stderr,
-			StartDir: t.TempDir(),
+			git:      runner,
+			hooks:    hooks.NewExecutor(),
+			stdout:   &stdout,
+			stderr:   &stderr,
+			startDir: t.TempDir(),
 		}
-		if exitCode := application.Run(context.Background(), args); exitCode != 1 {
+		if exitCode := application.Run(t.Context(), args); exitCode != 1 {
 			t.Fatalf("args %v: exit = %d, want 1", args, exitCode)
 		}
 		if stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage:") {
@@ -84,6 +84,22 @@ func TestInvalidHelpAndVersionCombinationsAreUsageErrors(t *testing.T) {
 		if runner.calls != 0 {
 			t.Fatalf("args %v: Git calls = %d, want 0", args, runner.calls)
 		}
+	}
+}
+
+func TestRunRejectsIncompleteConfiguration(t *testing.T) {
+	var nilApp *App
+	if exitCode := nilApp.Run(t.Context(), nil); exitCode != 1 {
+		t.Fatalf("nil App exit = %d, want 1", exitCode)
+	}
+
+	var stderr bytes.Buffer
+	application := &App{stderr: &stderr}
+	if exitCode := application.Run(t.Context(), nil); exitCode != 1 {
+		t.Fatalf("incomplete App exit = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "dependencies are not configured") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 

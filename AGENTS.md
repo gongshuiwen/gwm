@@ -4,31 +4,31 @@
 
 ## Scope
 
-这些规则适用于整个 GWM 项目。产品文档使用中文；代码、标识符、命令和固定协议字段保持其原始英文形式。
+这些规则适用于整个 GWM 项目。产品文档集中在 `docs/` 并使用中文；根目录 `README.md` 只作为用户入口。代码、标识符、命令和固定协议字段保持其原始英文形式。
 
 ## Required Reading
 
 规划或实施前完整阅读：
 
 1. `README.md`
-2. `DESIGN.md`
-3. `SPEC.md`
-4. `PLAN.md`
+2. `docs/DESIGN.md`
+3. `docs/SPEC.md`
+4. `docs/PLAN.md`
 
 权威顺序为：DESIGN（产品边界）→ SPEC（可观察行为）→ PLAN（阶段与验收）→ 本文件（实施动作）。README 只用于概览和导航。发现冲突时停止受影响工作并先修正文档。
 
 ## Current State
 
-当前状态只从 `PLAN.md` 和实时命令获取，不在本文件复制日期、Git 初始化或工具链状态。编码前必须重新运行 `git --version` 和 `go version`。
+当前状态只从 `docs/PLAN.md` 和实时命令获取，不在本文件复制日期、Git 初始化或工具链状态。编码前必须重新运行 `git --version` 和 `go version`。
 
 ## Implementation Scope
 
-- 严格按 `PLAN.md` 的当前阶段实施；一次阶段请求不授权后续阶段。
-- v0.2 只实现 `init`、`list`、`add`、`meta`、`remove`。
-- v0.2 只实现 `pre-add`、`post-add`、`pre-remove`、`post-remove`。
-- v0.2 提供 root/subcommand `--help` 和 root `--version`；它们不得发现 repository 或运行 Git/Hook。
+- 严格按 `docs/PLAN.md` 的当前阶段实施；一次阶段请求不授权后续阶段。
+- 当前待发布版本只实现 `init`、`list`、`add`、`meta`、`remove`。
+- 当前待发布版本只实现 `pre-add`、`post-add`、`pre-remove`、`post-remove`。
+- 当前待发布版本提供 root/subcommand `--help` 和 root `--version`；它们不得发现 repository 或运行 Git/Hook。
 - 不提前增加 DESIGN 明确延期的命令、状态系统或扩展接口。
-- 可观察行为变化必须先更新 `SPEC.md`，产品边界变化必须先更新 `DESIGN.md`。
+- 可观察行为变化必须先更新 `docs/SPEC.md`，产品边界变化必须先更新 `docs/DESIGN.md`。
 
 ## Git And Metadata Safety
 
@@ -61,13 +61,13 @@
 
 ## External State And Dependencies
 
-- v0.2 运行时只依赖 Go 标准库和系统 Git。
+- 当前待发布版本运行时只依赖 Go 标准库和系统 Git。
 - 未经明确授权，不得安装工具链、提交代码、创建 remote、配置 CI 或发布制品。
-- 新增依赖、网络行为或自动发现/启用 tracked Hook 前必须先更新 `DESIGN.md` 并说明信任与供应链影响。
-- Canonical repository 固定为 `https://github.com/gongshuiwen/gwm`，module path 固定为 `github.com/gongshuiwen/gwm`；变更两者前必须先更新 `DESIGN.md` 和 `PLAN.md`。
+- 新增依赖、网络行为或自动发现/启用 tracked Hook 前必须先更新 `docs/DESIGN.md` 并说明信任与供应链影响。
+- Canonical repository 固定为 `https://github.com/gongshuiwen/gwm`，module path 固定为 `github.com/gongshuiwen/gwm`；变更两者前必须先更新 `docs/DESIGN.md` 和 `docs/PLAN.md`。
 
 ## Validation
 
-执行 `PLAN.md` 当前阶段列出的验证。文档变更还必须检查链接、围栏、JSON 示例，以及五个业务命令、两个信息 flag、三个 metadata 字段、四个 Hook、Hook schema 2 和四阶段计划的一致性。
+执行 `docs/PLAN.md` 当前阶段列出的验证。文档变更还必须检查链接、围栏、JSON 示例，以及五个业务命令、两个信息 flag、三个 metadata 字段、四个 Hook、Hook schema 2 和四阶段计划的一致性。
 
 无法运行的验证必须报告原因、风险和替代检查，不能表述为通过。

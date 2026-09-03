@@ -4,14 +4,14 @@ GWM（Git Worktree Manager）是原生 `git worktree` 的本地薄包装器。�
 
 | 项目 | 状态 |
 |---|---|
-| 当前版本 | v0.2（本地实现完成，尚未发布） |
+| 当前版本 | Unreleased（待发布） |
 | 运行平台 | Linux、macOS 13+ |
 | 最低依赖 | Git 2.39、Go 1.26（仅构建需要 Go） |
 | 运行时依赖 | Go 标准库、系统 Git |
 | 许可证 | MIT |
 | 源码仓库 | [github.com/gongshuiwen/gwm](https://github.com/gongshuiwen/gwm) |
 
-> 当前尚无 CI、版本标签或发布制品。发布前事项见 [PLAN.md](PLAN.md)。
+> 当前已配置 tag 驱动的 GitHub Actions 发布流水线，但尚无版本标签或发布制品。发布前事项见 [docs/PLAN.md](docs/PLAN.md)。
 
 ## 功能
 
@@ -20,7 +20,7 @@ GWM（Git Worktree Manager）是原生 `git worktree` 的本地薄包装器。�
 - 在 GWM 发起 add/remove 时执行 `pre-add`、`post-add`、`pre-remove`、`post-remove`。
 - 保持 Git 为 path、HEAD、branch、locked 和工作树存在性的唯一事实源。
 
-GWM 不替代 Git，也不提供工作树历史、事务、自动回滚、后台服务或远端集成。完整边界见 [DESIGN.md](DESIGN.md)。
+GWM 不替代 Git，也不提供工作树历史、事务、自动回滚、后台服务或远端集成。完整边界见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 构建
 
@@ -28,7 +28,7 @@ GWM 不替代 Git，也不提供工作树历史、事务、自动回滚、后台
 go build -o bin/gwm ./cmd/gwm
 ```
 
-构建完成后可以直接运行 `bin/gwm`，或将它复制到本机 `PATH` 中的目录。Canonical Go module path 是 `github.com/gongshuiwen/gwm`；项目尚未发布版本标签或预编译制品。
+构建完成后可以直接运行 `bin/gwm`，或将它复制到本机 `PATH` 中的目录。普通源码构建不包含预设产品版本号，`gwm --version` 显示 `gwm unreleased`。Canonical Go module path 是 `github.com/gongshuiwen/gwm`；项目尚未发布版本标签或预编译制品。
 
 ## 快速开始
 
@@ -60,7 +60,7 @@ gwm [-C <repository>] meta <path>
 gwm [-C <repository>] remove <path> [--force]
 ```
 
-`--help` 和 `--version` 不要求当前目录位于 Git repository；它们分别输出帮助或 `gwm v0.2`，成功时返回 0。
+`--help` 和 `--version` 不要求当前目录位于 Git repository。普通源码构建的版本输出为 `gwm unreleased`，正式发布二进制则显示对应 release tag；成功时返回 0。
 
 | 命令 | 作用 |
 |---|---|
@@ -70,7 +70,7 @@ gwm [-C <repository>] remove <path> [--force]
 | `meta` | 查看或更新已登记 worktree 的 metadata |
 | `remove` | 调用一次 `git worktree remove`，不删除 branch |
 
-精确参数、输出和失败语义以 [SPEC.md](SPEC.md) 为准。
+精确参数、输出和失败语义以 [docs/SPEC.md](docs/SPEC.md) 为准。
 
 ## Metadata
 
@@ -104,7 +104,7 @@ git config --local gwm.hooks.pre-remove .githooks/gwm/lifecycle-notify
 git config --local gwm.hooks.post-remove .githooks/gwm/lifecycle-notify
 ```
 
-相对 Hook path 始终以 main worktree 根目录解析，即使命令从 linked worktree 调用也是如此；也可以配置仓库外的绝对路径。解析结果必须是普通可执行文件。GWM 直接执行它，不经过 shell，不附加参数，也不从 tracked 文件或 remote 自动发现 Hook。事件信息通过 JSON stdin 传入；完整 payload 见 [SPEC.md 的 Hook 配置](SPEC.md#10-hook-配置)。
+相对 Hook path 始终以 main worktree 根目录解析，即使命令从 linked worktree 调用也是如此；也可以配置仓库外的绝对路径。解析结果必须是普通可执行文件。GWM 直接执行它，不经过 shell，不附加参数，也不从 tracked 文件或 remote 自动发现 Hook。事件信息通过 JSON stdin 传入；完整 payload 见 [SPEC 的 Hook 配置](docs/SPEC.md#10-hook-配置)。
 
 Clone 只取得 `.githooks/` 中的文件，不会取得源仓库 `.git/config` 中的启用状态，因此默认不执行。
 
@@ -139,16 +139,25 @@ internal/app/     命令解析与五个命令流程
 internal/gitcli/  Git 参数数组 runner 与 config 读取
 internal/meta/    gwm.worktree.* 校验和读写
 internal/hooks/   Hook 配置、payload 和直接执行
+docs/             设计、规范、项目状态和背景资料
+.github/workflows/ Tag 驱动的 GitHub Actions 发布流水线
 ```
+
+## 发布
+
+发布由 [`.github/workflows/release.yml`](.github/workflows/release.yml) 定义。向 GitHub push 稳定 SemVer tag 后，流水线会运行测试与静态检查，将 tag 注入二进制，构建 Linux/macOS 的 amd64/arm64 压缩包，验证版本输出，生成 SHA-256 校验文件，并创建 GitHub Release。
+
+流水线不支持手动触发，也不会由 branch 或 pull request 自动发布。创建并 push tag 是显式发布授权；执行前仍须满足 [docs/PLAN.md](docs/PLAN.md) 中未完成的发布门槛。
 
 ## 文档
 
 | 文档 | 职责 |
 |---|---|
-| [DESIGN.md](DESIGN.md) | 产品边界、架构选择和安全原则 |
-| [SPEC.md](SPEC.md) | 命令、metadata、Hook、输出和退出码的规范 |
-| [PLAN.md](PLAN.md) | 当前状态、已完成里程碑和发布门槛 |
-| [GIT_WORKTREE.md](GIT_WORKTREE.md) | 原生 Git worktree 的功能、版本历史和 GWM 兼容性背景 |
+| [docs/README.md](docs/README.md) | 文档索引和推荐阅读顺序 |
+| [docs/DESIGN.md](docs/DESIGN.md) | 产品边界、架构选择和安全原则 |
+| [docs/SPEC.md](docs/SPEC.md) | 命令、metadata、Hook、输出和退出码的规范 |
+| [docs/PLAN.md](docs/PLAN.md) | 当前状态、已完成里程碑和发布门槛 |
+| [docs/GIT_WORKTREE.md](docs/GIT_WORKTREE.md) | 原生 Git worktree 的功能、版本历史和兼容性背景 |
 | [AGENTS.md](AGENTS.md) | 自动化开发代理的仓库约束 |
 | [LICENSE](LICENSE) | MIT 许可证全文 |
 

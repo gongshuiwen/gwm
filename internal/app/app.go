@@ -1,7 +1,9 @@
+// Package app parses and executes GWM command-line operations.
 package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +15,8 @@ import (
 	"github.com/gongshuiwen/gwm/internal/hooks"
 )
 
-const version = "v0.2"
+// version is injected for release builds with go build -ldflags -X.
+var version string
 
 const usage = `usage:
   gwm [-C <repository>] --help
@@ -41,37 +44,43 @@ options:
   --help           Show help
   --version        Show version`
 
+// App owns the process boundaries and streams used by the CLI.
 type App struct {
-	Git      gitcli.Runner
-	Hooks    hooks.Executor
-	Out      io.Writer
-	Err      io.Writer
-	StartDir string
+	git      gitcli.Runner
+	hooks    hooks.Executor
+	stdout   io.Writer
+	stderr   io.Writer
+	startDir string
 }
 
+// New creates an App backed by the system Git executable and process streams.
 func New() *App {
 	startDir, err := os.Getwd()
 	if err != nil {
 		startDir = "."
 	}
 	return &App{
-		Git:      gitcli.New(),
-		Hooks:    hooks.NewExecutor(),
-		Out:      os.Stdout,
-		Err:      os.Stderr,
-		StartDir: startDir,
+		git:      gitcli.New(),
+		hooks:    hooks.NewExecutor(),
+		stdout:   os.Stdout,
+		stderr:   os.Stderr,
+		startDir: startDir,
 	}
 }
 
+// Run executes one CLI invocation and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
-	if a.Git == nil || a.Hooks == nil || a.Out == nil || a.Err == nil {
-		return a.fail(fmt.Errorf("application dependencies are not configured"))
+	if a == nil || a.stderr == nil {
+		return 1
 	}
-	start := a.StartDir
+	if a.git == nil || a.hooks == nil || a.stdout == nil {
+		return a.fail(errors.New("application dependencies are not configured"))
+	}
+	start := a.startDir
 	if start == "" {
 		start = "."
 	}
-	if len(args) >= 1 && args[0] == "-C" {
+	if len(args) > 0 && args[0] == "-C" {
 		if len(args) < 2 || args[1] == "" {
 			return a.usageError("-C requires a repository path")
 		}
@@ -91,61 +100,68 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if len(args) == 1 {
 		switch args[0] {
 		case "--help":
-			fmt.Fprintln(a.Out, rootHelp)
+			fmt.Fprintln(a.stdout, rootHelp)
 			return 0
 		case "--version":
-			fmt.Fprintf(a.Out, "gwm %s\n", version)
+			fmt.Fprintf(a.stdout, "gwm %s\n", currentVersion())
 			return 0
 		}
 	}
 	if len(args) == 2 && args[1] == "--help" {
 		if help, ok := commandHelp(args[0]); ok {
-			fmt.Fprintln(a.Out, help)
+			fmt.Fprintln(a.stdout, help)
 			return 0
 		}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return a.usageError("options must follow a command, except for -C")
 	}
-	var execute func(*Repository) int
+	var execute func(*repositoryContext) int
 	switch args[0] {
 	case "init":
 		if len(args) != 1 {
 			return a.usageError("init accepts no arguments")
 		}
-		execute = func(repository *Repository) int { return a.init(ctx, repository) }
+		execute = func(repository *repositoryContext) int { return a.init(ctx, repository) }
 	case "list":
 		if len(args) != 1 {
 			return a.usageError("list accepts no arguments")
 		}
-		execute = func(repository *Repository) int { return a.list(ctx, repository) }
+		execute = func(repository *repositoryContext) int { return a.list(ctx, repository) }
 	case "add":
 		options, err := parseAdd(args[1:])
 		if err != nil {
 			return a.usageError(err.Error())
 		}
-		execute = func(repository *Repository) int { return a.add(ctx, repository, options) }
+		execute = func(repository *repositoryContext) int { return a.add(ctx, repository, options) }
 	case "meta":
 		options, err := parseMeta(args[1:])
 		if err != nil {
 			return a.usageError(err.Error())
 		}
-		execute = func(repository *Repository) int { return a.metadata(ctx, repository, options) }
+		execute = func(repository *repositoryContext) int { return a.metadata(ctx, repository, options) }
 	case "remove":
 		options, err := parseRemove(args[1:])
 		if err != nil {
 			return a.usageError(err.Error())
 		}
-		execute = func(repository *Repository) int { return a.remove(ctx, repository, options) }
+		execute = func(repository *repositoryContext) int { return a.remove(ctx, repository, options) }
 	default:
 		return a.usageError(fmt.Sprintf("unknown command %q", args[0]))
 	}
 
-	repository, err := Discover(ctx, a.Git, start)
+	repository, err := discover(ctx, a.git, start)
 	if err != nil {
 		return a.fail(err)
 	}
 	return execute(repository)
+}
+
+func currentVersion() string {
+	if version == "" {
+		return "unreleased"
+	}
+	return version
 }
 
 func commandHelp(command string) (string, bool) {
@@ -176,23 +192,23 @@ Remove an unprotected linked worktree through Git.`, true
 }
 
 func (a *App) usageError(message string) int {
-	fmt.Fprintf(a.Err, "gwm: %s\n%s\n", message, usage)
+	fmt.Fprintf(a.stderr, "gwm: %s\n%s\n", message, usage)
 	return 1
 }
 
 func (a *App) fail(err error) int {
-	fmt.Fprintf(a.Err, "gwm: %v\n", err)
+	fmt.Fprintf(a.stderr, "gwm: %v\n", err)
 	return 1
 }
 
 func (a *App) partial(operation string, errs ...error) int {
-	fmt.Fprintf(a.Err, "gwm: partial success: git worktree %s completed; GWM follow-up failed", operation)
+	fmt.Fprintf(a.stderr, "gwm: partial success: git worktree %s completed; GWM follow-up failed", operation)
 	for _, err := range errs {
 		if err != nil {
-			fmt.Fprintf(a.Err, ": %v", err)
+			fmt.Fprintf(a.stderr, ": %v", err)
 		}
 	}
-	fmt.Fprintln(a.Err)
+	fmt.Fprintln(a.stderr)
 	return 2
 }
 

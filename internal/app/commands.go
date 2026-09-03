@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,13 +14,15 @@ import (
 	"github.com/gongshuiwen/gwm/internal/meta"
 )
 
-func (a *App) init(ctx context.Context, repository *Repository) int {
+const worktreeConfigKey = "extensions.worktreeConfig"
+
+func (a *App) init(ctx context.Context, repository *repositoryContext) int {
 	initialized, err := worktreeConfigEnabled(ctx, repository)
 	if err != nil {
 		return a.fail(err)
 	}
 	if initialized {
-		fmt.Fprintln(a.Out, "GWM already initialized")
+		fmt.Fprintln(a.stdout, "GWM already initialized")
 		return 0
 	}
 	for _, key := range []string{"core.worktree", "core.sparseCheckout", "core.sparseCheckoutCone"} {
@@ -38,35 +41,35 @@ func (a *App) init(ctx context.Context, repository *Repository) int {
 	if !missing {
 		for _, value := range bareValues {
 			if value == "true" {
-				return a.fail(fmt.Errorf("cannot initialize: common config contains core.bare=true"))
+				return a.fail(errors.New("cannot initialize: common config contains core.bare=true"))
 			}
 		}
 	}
-	result := repository.RunCommon(ctx, "config", "--local", "--replace-all", "extensions.worktreeConfig", "true")
+	result := repository.runCommon(ctx, "config", "--local", "--replace-all", worktreeConfigKey, "true")
 	afterInitialized, readErr := worktreeConfigEnabled(ctx, repository)
 	if !result.Success() {
-		return a.fail(gitcli.ResultError("enable extensions.worktreeConfig", result))
+		return a.fail(gitcli.ResultError("enable "+worktreeConfigKey, result))
 	}
 	if readErr != nil {
-		return a.fail(fmt.Errorf("verify extensions.worktreeConfig: %w", readErr))
+		return a.fail(fmt.Errorf("verify %s: %w", worktreeConfigKey, readErr))
 	}
 	if !afterInitialized {
-		return a.fail(fmt.Errorf("extensions.worktreeConfig was not true after write"))
+		return a.fail(fmt.Errorf("%s was not true after write", worktreeConfigKey))
 	}
-	fmt.Fprintln(a.Out, "GWM initialized")
+	fmt.Fprintln(a.stdout, "GWM initialized")
 	return 0
 }
 
-func (a *App) list(ctx context.Context, repository *Repository) int {
+func (a *App) list(ctx context.Context, repository *repositoryContext) int {
 	initialized, err := worktreeConfigEnabled(ctx, repository)
 	if err != nil {
 		return a.fail(err)
 	}
-	worktrees, err := repository.Worktrees(ctx)
+	worktrees, err := repository.worktrees(ctx)
 	if err != nil {
 		return a.fail(err)
 	}
-	writer := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
+	writer := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(writer, "PATH\tBRANCH\tDESCRIPTION\tPROTECTED\tCREATED_AT")
 	for _, worktree := range worktrees {
 		branch := "-"
@@ -96,7 +99,7 @@ func (a *App) list(ctx context.Context, repository *Repository) int {
 	return 0
 }
 
-func (a *App) add(ctx context.Context, repository *Repository, options addOptions) int {
+func (a *App) add(ctx context.Context, repository *repositoryContext, options addOptions) int {
 	if err := requireInitialized(ctx, repository); err != nil {
 		return a.fail(err)
 	}
@@ -104,14 +107,14 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 	if err != nil {
 		return a.fail(err)
 	}
-	before, err := repository.Worktrees(ctx)
+	before, err := repository.worktrees(ctx)
 	if err != nil {
 		return a.fail(err)
 	}
 	if _, exists := findWorktree(before, target); exists {
 		return a.fail(fmt.Errorf("worktree is already registered: %s", escapeHuman(target)))
 	}
-	requested := meta.Metadata{Description: meta.Pointer(options.Description), Protected: options.Protected}
+	requested := meta.Metadata{Description: meta.DescriptionPointer(options.Description), Protected: options.Protected}
 	if err := meta.Validate(requested); err != nil {
 		return a.fail(fmt.Errorf("invalid requested metadata: %w", err))
 	}
@@ -120,7 +123,7 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 		From:      optionalPointer(options.From, options.FromProvided),
 		Detach:    options.Detach,
 	}
-	prePayload := a.payload(repository, hooks.PreAdd, target, nil, requestedPointer(requested), hookOptions)
+	prePayload := a.payload(repository, hooks.PreAdd, target, nil, metadataPointer(requested), hookOptions)
 	if err := a.runHook(ctx, repository, prePayload); err != nil {
 		return a.fail(err)
 	}
@@ -135,9 +138,9 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 	if options.FromProvided {
 		gitArgs = append(gitArgs, options.From)
 	}
-	result := repository.Run(ctx, gitArgs...)
+	result := repository.run(ctx, gitArgs...)
 	a.writeGitResult(result)
-	after, listErr := repository.Worktrees(ctx)
+	after, listErr := repository.worktrees(ctx)
 	if listErr != nil {
 		return a.fail(fmt.Errorf("git worktree add returned; read current worktree state: %w", listErr))
 	}
@@ -146,7 +149,7 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 		if !result.Success() {
 			return a.fail(fmt.Errorf("git worktree add failed; target registered after command: %t", exists))
 		}
-		return a.fail(fmt.Errorf("git worktree add exited successfully but target is not registered"))
+		return a.fail(errors.New("git worktree add exited successfully but target is not registered"))
 	}
 
 	createdAt := meta.FormatCreatedAt(time.Now())
@@ -160,11 +163,11 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 	if metadataErr != nil || postErr != nil {
 		return a.partial("add", metadataErr, postErr)
 	}
-	fmt.Fprintf(a.Out, "Added worktree %s\n", escapeHuman(target))
+	fmt.Fprintf(a.stdout, "Added worktree %s\n", escapeHuman(target))
 	return 0
 }
 
-func (a *App) metadata(ctx context.Context, repository *Repository, options metaOptions) int {
+func (a *App) metadata(ctx context.Context, repository *repositoryContext, options metaOptions) int {
 	if err := requireInitialized(ctx, repository); err != nil {
 		return a.fail(err)
 	}
@@ -172,7 +175,7 @@ func (a *App) metadata(ctx context.Context, repository *Repository, options meta
 	if err != nil {
 		return a.fail(err)
 	}
-	worktrees, err := repository.Worktrees(ctx)
+	worktrees, err := repository.worktrees(ctx)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -189,28 +192,28 @@ func (a *App) metadata(ctx context.Context, repository *Repository, options meta
 		if current.Description != nil {
 			description = escapeHuman(*current.Description)
 		}
-		fmt.Fprintf(a.Out, "DESCRIPTION\t%s\nPROTECTED\t%t\nCREATED_AT\t%s\n", description, current.Protected, displayCreatedAt(current))
+		fmt.Fprintf(a.stdout, "DESCRIPTION\t%s\nPROTECTED\t%t\nCREATED_AT\t%s\n", description, current.Protected, displayCreatedAt(current))
 		return 0
 	}
 	intended := current
 	if options.DescriptionProvided {
-		intended.Description = meta.Pointer(options.Description)
+		intended.Description = meta.DescriptionPointer(options.Description)
 	}
 	if options.ProtectedProvided {
 		intended.Protected = options.Protected
 	}
 	if meta.EqualEditable(current, intended) {
-		fmt.Fprintln(a.Out, "Metadata unchanged")
+		fmt.Fprintln(a.stdout, "Metadata unchanged")
 		return 0
 	}
 	if err := meta.Write(ctx, repository.Git, worktree.Path, intended); err != nil {
 		return a.fail(err)
 	}
-	fmt.Fprintf(a.Out, "Updated metadata for %s\n", escapeHuman(target))
+	fmt.Fprintf(a.stdout, "Updated metadata for %s\n", escapeHuman(target))
 	return 0
 }
 
-func (a *App) remove(ctx context.Context, repository *Repository, options removeOptions) int {
+func (a *App) remove(ctx context.Context, repository *repositoryContext, options removeOptions) int {
 	if err := requireInitialized(ctx, repository); err != nil {
 		return a.fail(err)
 	}
@@ -218,7 +221,7 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 	if err != nil {
 		return a.fail(err)
 	}
-	before, err := repository.Worktrees(ctx)
+	before, err := repository.worktrees(ctx)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -227,17 +230,17 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 		return a.fail(fmt.Errorf("worktree is not registered: %s", escapeHuman(target)))
 	}
 	if worktree.IsMain || worktree.Bare || worktree.Locked {
-		return a.fail(fmt.Errorf("GWM remove accepts only unlocked linked worktrees"))
+		return a.fail(errors.New("GWM remove accepts only unlocked linked worktrees"))
 	}
 	metadata, err := meta.Read(ctx, repository.Git, worktree.Path)
 	if err != nil {
 		return a.fail(fmt.Errorf("read worktree metadata for %s: %w", escapeHuman(target), err))
 	}
 	if metadata.Protected {
-		return a.fail(fmt.Errorf("worktree is protected; set --protected false before removing it"))
+		return a.fail(errors.New("worktree is protected; set --protected false before removing it"))
 	}
 	hookOptions := hooks.Options{Force: options.Force}
-	prePayload := a.payload(repository, hooks.PreRemove, target, &worktree, requestedPointer(metadata), hookOptions)
+	prePayload := a.payload(repository, hooks.PreRemove, target, &worktree, metadataPointer(metadata), hookOptions)
 	if err := a.runHook(ctx, repository, prePayload); err != nil {
 		return a.fail(err)
 	}
@@ -247,9 +250,9 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 		gitArgs = append(gitArgs, "--force")
 	}
 	gitArgs = append(gitArgs, target)
-	result := repository.Run(ctx, gitArgs...)
+	result := repository.run(ctx, gitArgs...)
 	a.writeGitResult(result)
-	after, listErr := repository.Worktrees(ctx)
+	after, listErr := repository.worktrees(ctx)
 	if listErr != nil {
 		return a.fail(fmt.Errorf("git worktree remove returned; read current worktree state: %w", listErr))
 	}
@@ -258,18 +261,18 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 		if !result.Success() {
 			return a.fail(fmt.Errorf("git worktree remove failed; target registered after command: %t", remains))
 		}
-		return a.fail(fmt.Errorf("git worktree remove exited successfully but target remains registered"))
+		return a.fail(errors.New("git worktree remove exited successfully but target remains registered"))
 	}
-	postPayload := a.payload(repository, hooks.PostRemove, target, &worktree, requestedPointer(metadata), hookOptions)
+	postPayload := a.payload(repository, hooks.PostRemove, target, &worktree, metadataPointer(metadata), hookOptions)
 	if err := a.runHook(ctx, repository, postPayload); err != nil {
 		return a.partial("remove", err)
 	}
-	fmt.Fprintf(a.Out, "Removed worktree %s\n", escapeHuman(target))
+	fmt.Fprintf(a.stdout, "Removed worktree %s\n", escapeHuman(target))
 	return 0
 }
 
-func worktreeConfigEnabled(ctx context.Context, repository *Repository) (bool, error) {
-	values, missing, err := gitcli.ConfigValues(ctx, repository.Git, repository.MainRoot, "--local", "extensions.worktreeConfig", true)
+func worktreeConfigEnabled(ctx context.Context, repository *repositoryContext) (bool, error) {
+	values, missing, err := gitcli.ConfigValues(ctx, repository.Git, repository.MainRoot, "--local", worktreeConfigKey, true)
 	if err != nil {
 		return false, err
 	}
@@ -277,23 +280,23 @@ func worktreeConfigEnabled(ctx context.Context, repository *Repository) (bool, e
 		return false, nil
 	}
 	if len(values) != 1 {
-		return false, fmt.Errorf("extensions.worktreeConfig must have exactly one value")
+		return false, fmt.Errorf("%s must have exactly one value", worktreeConfigKey)
 	}
 	return values[0] == "true", nil
 }
 
-func requireInitialized(ctx context.Context, repository *Repository) error {
+func requireInitialized(ctx context.Context, repository *repositoryContext) error {
 	initialized, err := worktreeConfigEnabled(ctx, repository)
 	if err != nil {
 		return err
 	}
 	if !initialized {
-		return fmt.Errorf("repository is not initialized; run gwm init first")
+		return errors.New("repository is not initialized; run gwm init first")
 	}
 	return nil
 }
 
-func (a *App) runHook(ctx context.Context, repository *Repository, payload hooks.Payload) error {
+func (a *App) runHook(ctx context.Context, repository *repositoryContext, payload hooks.Payload) error {
 	path, configured, err := hooks.ConfiguredPath(ctx, repository.Git, repository.MainRoot, payload.Event)
 	if err != nil {
 		return err
@@ -301,10 +304,10 @@ func (a *App) runHook(ctx context.Context, repository *Repository, payload hooks
 	if !configured {
 		return nil
 	}
-	return a.Hooks.Run(ctx, path, repository.Root, payload, a.Out, a.Err)
+	return a.hooks.Run(ctx, path, repository.Root, payload, a.stdout, a.stderr)
 }
 
-func (a *App) payload(repository *Repository, event, path string, worktree *Worktree, metadata *meta.Metadata, options hooks.Options) hooks.Payload {
+func (a *App) payload(repository *repositoryContext, event, path string, worktree *worktree, metadata *meta.Metadata, options hooks.Options) hooks.Payload {
 	payload := hooks.Payload{
 		SchemaVersion:  hooks.SchemaVersion,
 		Event:          event,
@@ -326,12 +329,11 @@ func observedMetadata(ctx context.Context, runner gitcli.Runner, path string) *m
 	if err != nil {
 		return nil
 	}
-	return requestedPointer(metadata)
+	return metadataPointer(metadata)
 }
 
-func requestedPointer(value meta.Metadata) *meta.Metadata {
-	copy := value
-	return &copy
+func metadataPointer(value meta.Metadata) *meta.Metadata {
+	return &value
 }
 
 func displayCreatedAt(metadata meta.Metadata) string {
@@ -348,16 +350,15 @@ func optionalPointer(value string, provided bool) *string {
 	if !provided {
 		return nil
 	}
-	copy := value
-	return &copy
+	return &value
 }
 
 func (a *App) writeGitResult(result gitcli.Result) {
 	if len(result.Stdout) > 0 {
-		_, _ = a.Out.Write(result.Stdout)
+		_, _ = a.stdout.Write(result.Stdout)
 	}
 	if len(result.Stderr) > 0 {
-		_, _ = a.Err.Write(result.Stderr)
+		_, _ = a.stderr.Write(result.Stderr)
 	}
 }
 
