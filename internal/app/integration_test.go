@@ -370,6 +370,47 @@ func TestHookOrderPayloadAndNativeBypass(t *testing.T) {
 	}
 }
 
+func TestRelativeHookPathResolvesFromMainWorktree(t *testing.T) {
+	repository := newTemporaryRepository(t)
+	repository.initGWM()
+
+	invocationRoot := filepath.Join(repository.base, "hook-invocation")
+	exitCode, _, stderr := repository.run("add", invocationRoot, "-b", "hook-invocation")
+	if exitCode != 0 {
+		t.Fatalf("setup add exited %d: %s", exitCode, stderr)
+	}
+
+	hookDirectory := filepath.Join(repository.root, ".githooks")
+	if err := os.Mkdir(hookDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hookPath := writeHook(t, hookDirectory, "#!/bin/sh\nexit 0\n")
+	relativeHookPath, err := filepath.Rel(repository.root, hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.git("-C", repository.root, "config", "--local", "gwm.hook.pre-add", relativeHookPath)
+
+	recorder := &recordingExecutor{}
+	var stdout bytes.Buffer
+	var linkedStderr bytes.Buffer
+	application := &App{
+		Git:      repository.runner,
+		Hooks:    recorder,
+		Out:      &stdout,
+		Err:      &linkedStderr,
+		StartDir: invocationRoot,
+	}
+	target := filepath.Join(repository.base, "relative-hook-target")
+	exitCode = application.Run(context.Background(), []string{"add", target, "--detach", "--from", "HEAD"})
+	if exitCode != 0 {
+		t.Fatalf("linked invocation add exited %d: %s", exitCode, linkedStderr.String())
+	}
+	if len(recorder.paths) != 1 || recorder.paths[0] != hookPath {
+		t.Fatalf("resolved hook paths = %q, want [%q]", recorder.paths, hookPath)
+	}
+}
+
 func TestPreAndPostHookFailures(t *testing.T) {
 	t.Run("pre blocks git", func(t *testing.T) {
 		repository := newTemporaryRepository(t)
@@ -577,9 +618,11 @@ func (r *failingMetadataRunner) Run(ctx context.Context, args ...string) gitcli.
 
 type recordingExecutor struct {
 	events []string
+	paths  []string
 }
 
-func (e *recordingExecutor) Run(_ context.Context, _ string, _ string, payload hooks.Payload, _, _ io.Writer) error {
+func (e *recordingExecutor) Run(_ context.Context, path string, _ string, payload hooks.Payload, _, _ io.Writer) error {
 	e.events = append(e.events, payload.Event)
+	e.paths = append(e.paths, path)
 	return nil
 }

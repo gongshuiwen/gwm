@@ -7,7 +7,7 @@
 | 项目状态 | 本地实现与验证完成，尚未发布 |
 | 最后验证 | 2026-09-03 |
 | Git 状态 | 已建立本地提交；无 remote 或 CI |
-| 本地工具 | Git 2.39.5；Go 1.26.8 |
+| 本地工具 | Git 2.55.0；Go 1.26.8 |
 
 本文件是项目进度、验收状态和发布门槛的唯一来源。产品边界见 [DESIGN.md](DESIGN.md)，可观察行为见 [SPEC.md](SPEC.md)。
 
@@ -16,6 +16,7 @@
 - 五个命令：`init`、`list`、`add`、`meta`、`remove`。
 - 两字段 metadata：`description`、`protected`。
 - 四个生命周期 Hook：`pre-add`、`post-add`、`pre-remove`、`post-remove`。
+- 一个可提交但必须由 local config 显式启用的 `.githooks/` 示例。
 - 仅依赖 Go 标准库和系统 Git 的本地 CLI。
 - 单元测试和使用独立临时 repository 的集成测试。
 - README、设计、行为规范和自动化开发约束。
@@ -41,7 +42,7 @@
 ### 阶段 1：Lifecycle Hook 与本地完成
 
 - [x] 实现四个 repository-local Hook key 的读取和唯一值验证。
-- [x] 验证 Hook 是绝对路径、普通可执行文件，并直接启动且不经过 shell。
+- [x] 支持绝对 Hook path 和相对于 main worktree 的 Hook path，验证普通可执行文件，并直接启动且不经过 shell。
 - [x] 实现固定 JSON stdin payload 和 invocation-root cwd。
 - [x] 接入 pre-add、post-add、pre-remove、post-remove 的规范顺序。
 - [x] 覆盖未配置、重复配置、不可执行、pre 非零和 post 非零。
@@ -74,7 +75,7 @@ go build ./cmd/gwm
 
 ### 最近一次本地验证
 
-2026-09-03 在 Linux amd64、Git 2.39.5、Go 1.26.8 环境完成：
+2026-09-03 在 Linux amd64、Git 2.55.0、Go 1.26.8 环境完成：
 
 - [x] 格式化检查
 - [x] `go test -count=1 ./...`

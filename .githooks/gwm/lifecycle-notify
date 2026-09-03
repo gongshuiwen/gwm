@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# GWM sends lifecycle context on stdin. This example deliberately discards it
+# so repository metadata is never persisted by the Hook.
+cat >/dev/null
+printf '%s\n' 'gwm lifecycle hook: accepted' >&2

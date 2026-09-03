@@ -24,7 +24,7 @@ v0.1 提供 `init`、`list`、`add`、`meta`、`remove` 五个命令和 `pre-add
 - doctor、adopt、edit、show 等独立命令
 - JSON CLI、稳定错误码和跨语言 schema
 - repository lock、transaction、自动回滚和崩溃恢复日志
-- Hook 链、重试、并行、全局 Hook 和 tracked Hook
+- Hook 链、重试、并行、全局 Hook，以及 tracked Hook 的自动发现或自动启用
 - move、lock、unlock、prune 的重复包装
 - fetch、push、远端发布判断、GUI 和后台服务
 
@@ -94,7 +94,7 @@ pre-add → git worktree add → metadata write → post-add
 pre-remove → git worktree remove → post-remove
 ```
 
-Hook 只从 common repository 的 local Git config 读取，每个事件最多配置一个绝对可执行文件：
+Hook 只从 common repository 的 local Git config 读取，每个事件最多配置一个 executable path：
 
 ```text
 gwm.hook.pre-add
@@ -103,7 +103,11 @@ gwm.hook.pre-remove
 gwm.hook.post-remove
 ```
 
-GWM 直接执行 Hook，不经过 shell，不从 tracked 文件发现 Hook，也不自动信任仓库内容。系统 Git 仍可能按用户已有配置运行原生 Hook、filter 或 fsmonitor；它们不属于 GWM Hook。
+绝对路径原样使用；相对路径固定以 main worktree 根目录解析，与命令从 main 或 linked worktree 调用无关。解析后的路径必须指向普通可执行文件。
+
+GWM 直接执行 Hook，不经过 shell，不从 tracked 文件发现 Hook，也不自动信任仓库内容。Hook executable 可以作为普通文件提交到 `.githooks/`，但文件存在本身不授予执行权限。每个 clone 必须由用户审查后，在该仓库的 local Git config 中显式配置路径；相对路径只是减少机器相关的绝对路径，不改变显式授权要求。Clone 不复制源仓库的 local config，GWM 也不在 clone 时执行生命周期 Hook。
+
+系统 Git 仍可能按用户已有配置运行原生 Hook、filter 或 fsmonitor；它们不属于 GWM Hook。
 
 Pre-hook 非零时不调用修改型 Git。Git 成功后，metadata 或 post-hook 失败只报告部分成功，不回滚工作树。
 
@@ -133,7 +137,7 @@ GWM 不增加 repository lock。并发 Git 操作由 Git 自身锁处理；metad
 ## 8. 安全与信任边界
 
 - 清除调用环境中的 Git repository 重定位和临时 config 注入变量。
-- 不自动执行 tracked 文件、remote 内容或网络返回内容。
+- 不因 tracked 文件存在而自动执行它，也不执行 remote 内容或网络返回内容。
 - Hook 必须由用户在 local Git config 中显式配置。
 - 不输出完整环境、credential、token、private key 或 Hook stdin。
 - 修改型测试只操作测试创建并独占的临时 repository。

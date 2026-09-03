@@ -70,14 +70,15 @@ func (e *CommandExecutor) Run(ctx context.Context, path, dir string, payload Pay
 	return nil
 }
 
-// ConfiguredPath reads one Hook from repository-local config and validates the
-// executable before a modifying Git command is allowed to run.
-func ConfiguredPath(ctx context.Context, runner gitcli.Runner, repositoryRoot, event string) (string, bool, error) {
+// ConfiguredPath reads one Hook from repository-local config, resolves relative
+// paths from the main worktree, and validates the executable before a modifying
+// Git command is allowed to run.
+func ConfiguredPath(ctx context.Context, runner gitcli.Runner, mainRoot, event string) (string, bool, error) {
 	if !validEvent(event) {
 		return "", false, fmt.Errorf("unknown hook event %q", event)
 	}
 	key := "gwm.hook." + event
-	values, missing, err := gitcli.ConfigValues(ctx, runner, repositoryRoot, "--local", key, false)
+	values, missing, err := gitcli.ConfigValues(ctx, runner, mainRoot, "--local", key, false)
 	if err != nil {
 		return "", false, err
 	}
@@ -88,8 +89,11 @@ func ConfiguredPath(ctx context.Context, runner gitcli.Runner, repositoryRoot, e
 		return "", false, fmt.Errorf("%s must have exactly one value", key)
 	}
 	path := values[0]
+	if path == "" {
+		return "", false, fmt.Errorf("%s must not be empty", key)
+	}
 	if !filepath.IsAbs(path) {
-		return "", false, fmt.Errorf("%s must be an absolute path", key)
+		path = filepath.Join(mainRoot, path)
 	}
 	info, err := os.Stat(path)
 	if err != nil {

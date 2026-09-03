@@ -184,9 +184,11 @@ gwm.hook.post-remove
 
 - 只读取 common repository 的 local Git config。
 - 每个 key 只能有一个值；重复值使对应操作拒绝执行。
-- 值必须是绝对路径，并指向可执行的普通文件。
+- 值是一个 non-empty path。绝对路径原样使用；相对路径以 main worktree 根目录解析。
+- 解析后的路径必须指向可执行的普通文件。
+- Executable 可以是 tracked 文件，但必须由用户在当前 clone 的 local config 中显式启用；文件存在不等于授权执行。
 - 直接执行该文件且不附加参数，不经过 shell。
-- Hook cwd 固定为 invocation worktree root。
+- Hook path 的相对解析基准固定为 main worktree；Hook cwd 固定为 invocation worktree root。两者互不影响。
 - Hook stdin 是一份 JSON payload；stdout/stderr 直接继承调用终端。
 - 未配置对应 key 时跳过该 Hook。
 - v0.1 没有 timeout、retry、并行或 Hook 链。
@@ -237,6 +239,7 @@ Partial 输出必须明确指出 Git 操作已经完成，避免用户误以为�
 
 ## 12. 兼容边界
 
+- `git clone` 不执行 GWM Hook，clone 也不继承源仓库的 local Hook 配置。
 - 原生 Git 操作不会触发 GWM Hook。
 - GWM 不包装 move、lock、unlock 或 prune；这些操作后 `gwm list` 直接展示 Git 新状态。
 - 原生 remove 可能随工作树删除 metadata；GWM 不保存历史副本。

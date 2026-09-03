@@ -83,16 +83,24 @@ GWM 只拥有目标工作树中的一个 worktree-scope 配置值：
 
 ## 生命周期 Hook
 
-Hook 通过 common repository 的 local Git config 显式配置：
+仓库可以提交 Hook executable，例如本项目提供的：
 
-```bash
-git config --local gwm.hook.pre-add /absolute/path/to/pre-add
-git config --local gwm.hook.post-add /absolute/path/to/post-add
-git config --local gwm.hook.pre-remove /absolute/path/to/pre-remove
-git config --local gwm.hook.post-remove /absolute/path/to/post-remove
+```text
+.githooks/gwm/lifecycle-notify
 ```
 
-Hook 必须是绝对路径指向的普通可执行文件。GWM 直接执行它，不经过 shell，不附加参数，也不从 tracked 文件或 remote 自动发现 Hook。事件信息通过 JSON stdin 传入；完整 payload 见 [SPEC.md 的 Hook 配置](SPEC.md#10-hook-配置)。
+Tracked 文件不会自动启用。用户审查脚本后，需要在该 clone 的 local Git config 中显式启用：
+
+```bash
+git config --local gwm.hook.pre-add .githooks/gwm/lifecycle-notify
+git config --local gwm.hook.post-add .githooks/gwm/lifecycle-notify
+git config --local gwm.hook.pre-remove .githooks/gwm/lifecycle-notify
+git config --local gwm.hook.post-remove .githooks/gwm/lifecycle-notify
+```
+
+相对 Hook path 始终以 main worktree 根目录解析，即使命令从 linked worktree 调用也是如此；也可以配置仓库外的绝对路径。解析结果必须是普通可执行文件。GWM 直接执行它，不经过 shell，不附加参数，也不从 tracked 文件或 remote 自动发现 Hook。事件信息通过 JSON stdin 传入；完整 payload 见 [SPEC.md 的 Hook 配置](SPEC.md#10-hook-配置)。
+
+Clone 只取得 `.githooks/` 中的文件，不会取得源仓库 `.git/config` 中的启用状态，因此默认不执行。
 
 原生 `git worktree` 命令不会触发 GWM Hook，也不会自动写入 GWM metadata。
 

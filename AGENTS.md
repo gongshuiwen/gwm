@@ -43,9 +43,10 @@
 ## Hook Safety
 
 - GWM Hook 只从 common repository 的 local Git config 读取。
-- Hook 必须是用户本地明确配置的绝对可执行文件。
+- Hook 必须由用户在 local config 中明确配置；绝对路径原样使用，相对路径以 main worktree 根目录解析，结果必须是可执行的普通文件。
 - Hook 使用参数数组直接执行，不经过 shell，不附加隐式参数。
 - 不从 tracked 文件、remote 或工作树内容自动发现 Hook。
+- Local config 可以显式指向用户已审查的 tracked executable；tracked 文件存在本身不授权执行。
 - Pre-hook 非零时不得启动对应修改型 Git。
 - Post-hook 失败不得回滚已经完成的 Git 操作。
 - 不记录 Hook stdin 中可能出现的敏感 metadata，也不输出完整环境。
@@ -61,7 +62,7 @@
 
 - v0.1 运行时只依赖 Go 标准库和系统 Git。
 - 未经明确授权，不得安装工具链、提交代码、创建 remote、配置 CI 或发布制品。
-- 新增依赖、网络行为或 tracked Hook 前必须先更新 `DESIGN.md` 并说明信任与供应链影响。
+- 新增依赖、网络行为或自动发现/启用 tracked Hook 前必须先更新 `DESIGN.md` 并说明信任与供应链影响。
 - 未确定 canonical module path 和许可证前，不得猜测并公开发布。
 
 ## Validation
