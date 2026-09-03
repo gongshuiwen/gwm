@@ -2,11 +2,11 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 设计基线 | 3.0（薄包装器） |
-| 实现版本 | v0.1 |
+| 设计基线 | 3.2（薄包装器） |
+| 实现版本 | v0.2 |
 | 项目状态 | 本地实现与验证完成，尚未发布 |
 | 最后验证 | 2026-09-03 |
-| Git 状态 | 已建立本地提交；无 remote 或 CI |
+| Git 状态 | GitHub `origin/main`；无 CI |
 | 本地工具 | Git 2.55.0；Go 1.26.8 |
 
 本文件是项目进度、验收状态和发布门槛的唯一来源。产品边界见 [DESIGN.md](DESIGN.md)，可观察行为见 [SPEC.md](SPEC.md)。
@@ -14,14 +14,16 @@
 ## 1. 当前产物
 
 - 五个命令：`init`、`list`、`add`、`meta`、`remove`。
-- 两字段 metadata：`description`、`protected`。
+- 三字段 metadata：`description`、`protected`、只读 `created-at`。
 - 四个生命周期 Hook：`pre-add`、`post-add`、`pre-remove`、`post-remove`。
+- Root help、五个子命令 help 和 version 信息入口。
 - 一个可提交但必须由 local config 显式启用的 `.githooks/` 示例。
 - 仅依赖 Go 标准库和系统 Git 的本地 CLI。
 - 单元测试和使用独立临时 repository 的集成测试。
 - README、设计、行为规范和自动化开发约束。
+- MIT `LICENSE`，Copyright (c) 2026 gongshuiwen。
 
-当前没有 canonical repository URL、最终 Go module path、许可证、remote、CI、发布渠道或发布制品。
+Canonical repository 是 `https://github.com/gongshuiwen/gwm`，Go module path 是 `github.com/gongshuiwen/gwm`。当前没有 CI、版本标签、发布渠道或发布制品。
 
 ## 2. 已完成里程碑
 
@@ -32,7 +34,7 @@
 - [x] 实现 `-C`、固定 repository context、Git 参数数组 runner 和环境隔离。
 - [x] 实现 `git worktree list --porcelain -z` 解析。
 - [x] 实现幂等 `init` 和 `extensions.worktreeConfig` preflight。
-- [x] 实现 `gwm.metadata` 严格解码、读取、单次替换和重读验证。
+- [x] 实现 `gwm.worktree.description`、`gwm.worktree.protected` 的校验、独立写入和重读验证。
 - [x] 实现 `list`、`add`、`meta`、`remove` 非 Hook 路径。
 - [x] 覆盖 main、linked、detached、locked、特殊 UTF-8 path、metadata missing/invalid 和原生 Git 失败。
 - [x] 验证失败时不猜测性回滚、remove 不递归补删目录且不删除 branch。
@@ -52,6 +54,25 @@
 
 退出条件已满足：五个命令、两字段 metadata 和四个 Hook 均符合 SPEC；partial 路径具有明确输出；实现中没有延期功能或空扩展接口。
 
+### 阶段 2：只读创建时间
+
+- [x] 增加可缺失的 `gwm.worktree.created-at`，由 `gwm add` 在 Git 成功后写入 UTC RFC 3339 时间。
+- [x] 在 `list` 和 `meta` 中展示 created-at，但不增加编辑参数、回填或推断。
+- [x] 保证非法 created-at 不使 description/protected 无效，也不阻止 `meta` 或 `remove`。
+- [x] 将 Hook payload 升级到 schema 2，并覆盖 pre/post add/remove 的 created_at 语义。
+- [x] 覆盖原生 Git 创建、缺失、非法、重复和 metadata 部分失败路径。
+
+退出条件已满足：三个 metadata 字段符合 SPEC，现有五个命令与四个 Hook 没有新增扩展接口，完整验证通过。
+
+### 阶段 3：CLI 自描述
+
+- [x] 实现 `gwm --help` 和五个 `gwm <command> --help`。
+- [x] 实现固定输出 `gwm v0.2` 的 `gwm --version`。
+- [x] 保证 help/version 不发现 repository、不运行 Git 或 Hook。
+- [x] 覆盖 stdout、退出码、无 repository 和非法组合。
+
+退出条件已满足：help/version 符合 SPEC，五个业务命令行为保持不变，完整验证通过。
+
 ## 3. 质量门槛
 
 Go 变更必须通过：
@@ -68,7 +89,7 @@ go build ./cmd/gwm
 
 - 没有尾随空白，代码围栏成对。
 - 所有相对链接有效，所有 fenced JSON 可解析。
-- 五个命令、两个 metadata 字段、四个 Hook 和两个实施阶段一致。
+- 五个业务命令、两个信息 flag、三个 metadata 字段、四个 Hook 和四个实施阶段一致。
 - README、DESIGN、SPEC、PLAN、AGENTS 之间没有规范循环定义。
 
 修改型集成测试必须创建并独占临时 repository，不访问网络、不创建 remote，也不执行用户机器上的真实 GWM Hook。具体约束见 [AGENTS.md](AGENTS.md)。
@@ -82,19 +103,20 @@ go build ./cmd/gwm
 - [x] `go test -race -count=1 ./...`
 - [x] `go vet ./...`
 - [x] 临时 CLI 构建
+- [x] Help/version 在 non-repository 目录运行
 - [x] 文档链接、JSON、围栏、术语和范围一致性检查
 
 macOS 13+ 和最低支持版本组合尚未完成发布级验证。
 
 ## 4. 发布门槛
 
-- [ ] 确认 canonical repository URL。
-- [ ] 确认最终 Go module path。
-- [ ] 选择并添加许可证。
+- [x] 确认 canonical repository URL：`https://github.com/gongshuiwen/gwm`。
+- [x] 确认最终 Go module path：`github.com/gongshuiwen/gwm`。
+- [x] 选择并添加 MIT 许可证。
 - [ ] 在 Linux 和 macOS 13+ 上验证最低与当前 Git/Go 组合。
 - [ ] 确认 CI、发布渠道、版本标记和发布授权。
 
-这些事项不阻塞本地开发，但在全部完成前不得将 v0.1 表述为正式发布，也不授权创建 remote、CI 或发布制品。
+这些事项不阻塞本地开发，但在全部完成前不得将 v0.2 表述为正式发布，也不授权创建 remote、CI 或发布制品。
 
 ## 5. 变更流程
 

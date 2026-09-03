@@ -3,52 +3,54 @@ package meta
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestDecode(t *testing.T) {
+func TestValidateDescription(t *testing.T) {
+	valid := strings.Repeat("界", 1365)
+	if err := Validate(Metadata{Description: &valid}); err != nil {
+		t.Fatalf("Validate(valid) error = %v", err)
+	}
+
 	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
+		name        string
+		description string
 	}{
-		{name: "valid", input: `{"description":"修复","protected":true}`},
-		{name: "null", input: `{"description":null,"protected":false}`},
-		{name: "missing", input: `{"description":null}`, wantErr: true},
-		{name: "unknown", input: `{"description":null,"protected":false,"id":1}`, wantErr: true},
-		{name: "duplicate", input: `{"description":null,"description":"x","protected":false}`, wantErr: true},
-		{name: "nul", input: `{"description":"\u0000","protected":false}`, wantErr: true},
-		{name: "wrong type", input: `{"description":1,"protected":false}`, wantErr: true},
-		{name: "trailing", input: `{"description":null,"protected":false}{}`, wantErr: true},
+		{name: "too large", description: strings.Repeat("界", 1366)},
+		{name: "nul", description: "bad\x00value"},
+		{name: "invalid UTF-8", description: string([]byte{0xff})},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := Decode([]byte(test.input))
-			if (err != nil) != test.wantErr {
-				t.Fatalf("Decode() error = %v, wantErr %v", err, test.wantErr)
+			if err := Validate(Metadata{Description: &test.description}); err == nil {
+				t.Fatal("Validate() succeeded")
 			}
 		})
 	}
 }
 
-func TestEncodeDescriptionLimit(t *testing.T) {
-	valid := strings.Repeat("界", 1365)
-	if _, err := Encode(Metadata{Description: &valid}); err != nil {
-		t.Fatalf("Encode(valid) error = %v", err)
+func TestFormatCreatedAt(t *testing.T) {
+	value := time.Date(2026, 9, 3, 16, 30, 0, 999, time.FixedZone("UTC+8", 8*60*60))
+	if got := FormatCreatedAt(value); got != "2026-09-03T08:30:00Z" {
+		t.Fatalf("FormatCreatedAt() = %q", got)
 	}
-	tooLarge := strings.Repeat("界", 1366)
-	if _, err := Encode(Metadata{Description: &tooLarge}); err == nil {
-		t.Fatal("Encode(tooLarge) succeeded")
+	for _, invalid := range []string{
+		"2026-09-03T08:30:00+00:00",
+		"2026-09-03T08:30:00.1Z",
+		"2026-09-03 08:30:00Z",
+	} {
+		if validCreatedAt(invalid) {
+			t.Fatalf("validCreatedAt(%q) = true", invalid)
+		}
 	}
 }
 
-func TestEncodeOrder(t *testing.T) {
-	value := "text"
-	got, err := Encode(Metadata{Description: &value, Protected: true})
-	if err != nil {
-		t.Fatal(err)
+func TestPointer(t *testing.T) {
+	if Pointer("") != nil {
+		t.Fatal("Pointer(empty) was not nil")
 	}
-	want := `{"description":"text","protected":true}`
-	if string(got) != want {
-		t.Fatalf("Encode() = %s, want %s", got, want)
+	value := Pointer("text")
+	if value == nil || *value != "text" {
+		t.Fatalf("Pointer(text) = %#v", value)
 	}
 }

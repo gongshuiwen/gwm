@@ -6,10 +6,11 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
-	"gwm/internal/gitcli"
-	"gwm/internal/hooks"
-	"gwm/internal/meta"
+	"github.com/gongshuiwen/gwm/internal/gitcli"
+	"github.com/gongshuiwen/gwm/internal/hooks"
+	"github.com/gongshuiwen/gwm/internal/meta"
 )
 
 func (a *App) init(ctx context.Context, repository *Repository) int {
@@ -66,7 +67,7 @@ func (a *App) list(ctx context.Context, repository *Repository) int {
 		return a.fail(err)
 	}
 	writer := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "PATH\tBRANCH\tDESCRIPTION\tPROTECTED")
+	fmt.Fprintln(writer, "PATH\tBRANCH\tDESCRIPTION\tPROTECTED\tCREATED_AT")
 	for _, worktree := range worktrees {
 		branch := "-"
 		if !worktree.Bare && !worktree.Detached && worktree.Branch != "" {
@@ -74,18 +75,20 @@ func (a *App) list(ctx context.Context, repository *Repository) int {
 		}
 		description := "-"
 		protected := "false"
+		createdAt := "-"
 		if initialized {
-			read, readErr := meta.Read(ctx, repository.Git, worktree.Path)
-			if readErr != nil || read.Invalid != nil {
+			metadata, readErr := meta.Read(ctx, repository.Git, worktree.Path)
+			if readErr != nil {
 				description, protected = "INVALID", "INVALID"
 			} else {
-				if read.Value.Description != nil {
-					description = escapeHuman(*read.Value.Description)
+				if metadata.Description != nil {
+					description = escapeHuman(*metadata.Description)
 				}
-				protected = strconv.FormatBool(read.Value.Protected)
+				protected = strconv.FormatBool(metadata.Protected)
+				createdAt = displayCreatedAt(metadata)
 			}
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", escapeHuman(worktree.Path), escapeHuman(branch), description, protected)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", escapeHuman(worktree.Path), escapeHuman(branch), description, protected, createdAt)
 	}
 	if err := writer.Flush(); err != nil {
 		return a.fail(fmt.Errorf("write list output: %w", err))
@@ -109,7 +112,7 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 		return a.fail(fmt.Errorf("worktree is already registered: %s", escapeHuman(target)))
 	}
 	requested := meta.Metadata{Description: meta.Pointer(options.Description), Protected: options.Protected}
-	if _, err := meta.Encode(requested); err != nil {
+	if err := meta.Validate(requested); err != nil {
 		return a.fail(fmt.Errorf("invalid requested metadata: %w", err))
 	}
 	hookOptions := hooks.Options{
@@ -146,7 +149,11 @@ func (a *App) add(ctx context.Context, repository *Repository, options addOption
 		return a.fail(fmt.Errorf("git worktree add exited successfully but target is not registered"))
 	}
 
+	createdAt := meta.FormatCreatedAt(time.Now())
 	metadataErr := meta.Write(ctx, repository.Git, created.Path, requested)
+	if metadataErr == nil {
+		metadataErr = meta.WriteCreatedAt(ctx, repository.Git, created.Path, createdAt)
+	}
 	observed := observedMetadata(ctx, repository.Git, created.Path)
 	postPayload := a.payload(repository, hooks.PostAdd, target, &created, observed, hookOptions)
 	postErr := a.runHook(ctx, repository, postPayload)
@@ -173,29 +180,26 @@ func (a *App) metadata(ctx context.Context, repository *Repository, options meta
 	if !exists {
 		return a.fail(fmt.Errorf("worktree is not registered: %s", escapeHuman(target)))
 	}
-	read, err := meta.Read(ctx, repository.Git, worktree.Path)
+	current, err := meta.Read(ctx, repository.Git, worktree.Path)
 	if err != nil {
-		return a.fail(err)
-	}
-	if read.Invalid != nil {
-		return a.fail(fmt.Errorf("invalid gwm.metadata for %s: %w", escapeHuman(target), read.Invalid))
+		return a.fail(fmt.Errorf("read worktree metadata for %s: %w", escapeHuman(target), err))
 	}
 	if !options.DescriptionProvided && !options.ProtectedProvided {
 		description := "-"
-		if read.Value.Description != nil {
-			description = escapeHuman(*read.Value.Description)
+		if current.Description != nil {
+			description = escapeHuman(*current.Description)
 		}
-		fmt.Fprintf(a.Out, "DESCRIPTION\t%s\nPROTECTED\t%t\n", description, read.Value.Protected)
+		fmt.Fprintf(a.Out, "DESCRIPTION\t%s\nPROTECTED\t%t\nCREATED_AT\t%s\n", description, current.Protected, displayCreatedAt(current))
 		return 0
 	}
-	intended := read.Value
+	intended := current
 	if options.DescriptionProvided {
 		intended.Description = meta.Pointer(options.Description)
 	}
 	if options.ProtectedProvided {
 		intended.Protected = options.Protected
 	}
-	if meta.Equal(read.Value, intended) {
+	if meta.EqualEditable(current, intended) {
 		fmt.Fprintln(a.Out, "Metadata unchanged")
 		return 0
 	}
@@ -225,18 +229,15 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 	if worktree.IsMain || worktree.Bare || worktree.Locked {
 		return a.fail(fmt.Errorf("GWM remove accepts only unlocked linked worktrees"))
 	}
-	read, err := meta.Read(ctx, repository.Git, worktree.Path)
+	metadata, err := meta.Read(ctx, repository.Git, worktree.Path)
 	if err != nil {
-		return a.fail(err)
+		return a.fail(fmt.Errorf("read worktree metadata for %s: %w", escapeHuman(target), err))
 	}
-	if read.Invalid != nil {
-		return a.fail(fmt.Errorf("invalid gwm.metadata for %s: %w", escapeHuman(target), read.Invalid))
-	}
-	if read.Value.Protected {
+	if metadata.Protected {
 		return a.fail(fmt.Errorf("worktree is protected; set --protected false before removing it"))
 	}
 	hookOptions := hooks.Options{Force: options.Force}
-	prePayload := a.payload(repository, hooks.PreRemove, target, &worktree, requestedPointer(read.Value), hookOptions)
+	prePayload := a.payload(repository, hooks.PreRemove, target, &worktree, requestedPointer(metadata), hookOptions)
 	if err := a.runHook(ctx, repository, prePayload); err != nil {
 		return a.fail(err)
 	}
@@ -259,7 +260,7 @@ func (a *App) remove(ctx context.Context, repository *Repository, options remove
 		}
 		return a.fail(fmt.Errorf("git worktree remove exited successfully but target remains registered"))
 	}
-	postPayload := a.payload(repository, hooks.PostRemove, target, &worktree, requestedPointer(read.Value), hookOptions)
+	postPayload := a.payload(repository, hooks.PostRemove, target, &worktree, requestedPointer(metadata), hookOptions)
 	if err := a.runHook(ctx, repository, postPayload); err != nil {
 		return a.partial("remove", err)
 	}
@@ -305,7 +306,7 @@ func (a *App) runHook(ctx context.Context, repository *Repository, payload hooks
 
 func (a *App) payload(repository *Repository, event, path string, worktree *Worktree, metadata *meta.Metadata, options hooks.Options) hooks.Payload {
 	payload := hooks.Payload{
-		SchemaVersion:  1,
+		SchemaVersion:  hooks.SchemaVersion,
 		Event:          event,
 		CommonDir:      repository.CommonDir,
 		InvocationRoot: repository.Root,
@@ -321,16 +322,26 @@ func (a *App) payload(repository *Repository, event, path string, worktree *Work
 }
 
 func observedMetadata(ctx context.Context, runner gitcli.Runner, path string) *meta.Metadata {
-	read, err := meta.Read(ctx, runner, path)
-	if err != nil || read.Invalid != nil {
+	metadata, err := meta.Read(ctx, runner, path)
+	if err != nil {
 		return nil
 	}
-	return requestedPointer(read.Value)
+	return requestedPointer(metadata)
 }
 
 func requestedPointer(value meta.Metadata) *meta.Metadata {
 	copy := value
 	return &copy
+}
+
+func displayCreatedAt(metadata meta.Metadata) string {
+	if metadata.CreatedAtInvalid {
+		return "INVALID"
+	}
+	if metadata.CreatedAt == nil {
+		return "-"
+	}
+	return *metadata.CreatedAt
 }
 
 func optionalPointer(value string, provided bool) *string {

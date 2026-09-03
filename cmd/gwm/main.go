@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"gwm/internal/app"
+	"github.com/gongshuiwen/gwm/internal/app"
 )
 
 func main() {

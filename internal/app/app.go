@@ -9,16 +9,37 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gwm/internal/gitcli"
-	"gwm/internal/hooks"
+	"github.com/gongshuiwen/gwm/internal/gitcli"
+	"github.com/gongshuiwen/gwm/internal/hooks"
 )
 
+const version = "v0.2"
+
 const usage = `usage:
+  gwm [-C <repository>] --help
+  gwm [-C <repository>] --version
+  gwm [-C <repository>] <command> --help
   gwm [-C <repository>] init
   gwm [-C <repository>] list
   gwm [-C <repository>] add <path> [-b <new-branch> | --detach] [--from <commit-ish>] [--description <text>] [--protected]
   gwm [-C <repository>] meta <path> [--description <text>] [--protected <true|false>]
   gwm [-C <repository>] remove <path> [--force]`
+
+const rootHelp = `GWM is a thin local wrapper around git worktree.
+
+` + usage + `
+
+commands:
+  init    Enable worktree-specific Git config
+  list    List worktrees and GWM metadata
+  add     Add a worktree and write GWM metadata
+  meta    Show or update worktree metadata
+  remove  Remove an unprotected linked worktree
+
+options:
+  -C <repository>  Run as if GWM was started in this repository
+  --help           Show help
+  --version        Show version`
 
 type App struct {
 	Git      gitcli.Runner
@@ -67,6 +88,22 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		return a.usageError("missing command")
 	}
+	if len(args) == 1 {
+		switch args[0] {
+		case "--help":
+			fmt.Fprintln(a.Out, rootHelp)
+			return 0
+		case "--version":
+			fmt.Fprintf(a.Out, "gwm %s\n", version)
+			return 0
+		}
+	}
+	if len(args) == 2 && args[1] == "--help" {
+		if help, ok := commandHelp(args[0]); ok {
+			fmt.Fprintln(a.Out, help)
+			return 0
+		}
+	}
 	if strings.HasPrefix(args[0], "-") {
 		return a.usageError("options must follow a command, except for -C")
 	}
@@ -109,6 +146,33 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.fail(err)
 	}
 	return execute(repository)
+}
+
+func commandHelp(command string) (string, bool) {
+	switch command {
+	case "init":
+		return `usage: gwm [-C <repository>] init
+
+Enable extensions.worktreeConfig for the repository.`, true
+	case "list":
+		return `usage: gwm [-C <repository>] list
+
+List Git worktrees with description, protection, and creation metadata.`, true
+	case "add":
+		return `usage: gwm [-C <repository>] add <path> [-b <new-branch> | --detach] [--from <commit-ish>] [--description <text>] [--protected]
+
+Add a worktree through Git, write metadata, and run configured lifecycle hooks.`, true
+	case "meta":
+		return `usage: gwm [-C <repository>] meta <path> [--description <text>] [--protected <true|false>]
+
+Show or update editable metadata for a registered worktree.`, true
+	case "remove":
+		return `usage: gwm [-C <repository>] remove <path> [--force]
+
+Remove an unprotected linked worktree through Git.`, true
+	default:
+		return "", false
+	}
 }
 
 func (a *App) usageError(message string) int {

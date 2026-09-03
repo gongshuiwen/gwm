@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gwm/internal/gitcli"
+	"github.com/gongshuiwen/gwm/internal/gitcli"
 )
 
 type Repository struct {

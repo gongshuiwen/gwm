@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"gwm/internal/gitcli"
-	"gwm/internal/hooks"
-	"gwm/internal/meta"
+	"github.com/gongshuiwen/gwm/internal/gitcli"
+	"github.com/gongshuiwen/gwm/internal/hooks"
+	"github.com/gongshuiwen/gwm/internal/meta"
 )
 
 type temporaryRepository struct {
@@ -91,20 +92,43 @@ func TestMetadataLifecycleAndNativeBoundaries(t *testing.T) {
 	repository.initGWM()
 
 	target := filepath.Join(repository.base, "linked 空间")
+	started := time.Now().UTC().Add(-time.Second)
 	exitCode, _, stderr := repository.run("add", target, "-b", "feature/topic", "--from", "HEAD", "--description", "line\nnext", "--protected")
+	finished := time.Now().UTC().Add(time.Second)
 	if exitCode != 0 {
 		t.Fatalf("gwm add exited %d: %s", exitCode, stderr)
 	}
 	read, err := meta.Read(context.Background(), repository.runner, target)
-	if err != nil || read.Invalid != nil || read.Value.Description == nil || *read.Value.Description != "line\nnext" || !read.Value.Protected {
+	if err != nil || read.Description == nil || *read.Description != "line\nnext" || !read.Protected || read.CreatedAt == nil || read.CreatedAtInvalid {
 		t.Fatalf("metadata after add = %#v, error = %v", read, err)
+	}
+	createdAt, err := time.Parse(time.RFC3339, *read.CreatedAt)
+	if err != nil || createdAt.Before(started) || createdAt.After(finished) {
+		t.Fatalf("created-at = %q, range = [%s, %s], error = %v", *read.CreatedAt, started, finished, err)
+	}
+	originalCreatedAt := *read.CreatedAt
+	description := repository.git("-C", target, "config", "--worktree", "--get-all", "gwm.worktree.description")
+	if string(description.Stdout) != "line\nnext\n" {
+		t.Fatalf("description config = %q", description.Stdout)
+	}
+	protected := repository.git("-C", target, "config", "--worktree", "--bool", "--get-all", "gwm.worktree.protected")
+	if string(protected.Stdout) != "true\n" {
+		t.Fatalf("protected config = %q", protected.Stdout)
+	}
+	createdAtConfig := repository.git("-C", target, "config", "--worktree", "--get-all", "gwm.worktree.created-at")
+	if string(createdAtConfig.Stdout) != originalCreatedAt+"\n" {
+		t.Fatalf("created-at config = %q", createdAtConfig.Stdout)
+	}
+	legacy := repository.runner.Run(context.Background(), "-C", target, "config", "--worktree", "--get-all", "gwm.metadata")
+	if legacy.Success() {
+		t.Fatalf("legacy metadata key was written: %q", legacy.Stdout)
 	}
 
 	exitCode, stdout, stderr := repository.run("list")
 	if exitCode != 0 {
 		t.Fatalf("gwm list exited %d: %s", exitCode, stderr)
 	}
-	if !strings.Contains(stdout, "feature/topic") || !strings.Contains(stdout, `line\nnext`) || strings.Contains(stdout, "line\nnext") {
+	if !strings.Contains(stdout, "CREATED_AT") || !strings.Contains(stdout, originalCreatedAt) || !strings.Contains(stdout, "feature/topic") || !strings.Contains(stdout, `line\nnext`) || strings.Contains(stdout, "line\nnext") {
 		t.Fatalf("list did not escape one worktree per line:\n%s", stdout)
 	}
 
@@ -121,8 +145,20 @@ func TestMetadataLifecycleAndNativeBoundaries(t *testing.T) {
 		t.Fatalf("gwm meta exited %d: %s", exitCode, stderr)
 	}
 	read, err = meta.Read(context.Background(), repository.runner, target)
-	if err != nil || read.Value.Description != nil || read.Value.Protected {
+	if err != nil || read.Description != nil || read.Protected || read.CreatedAt == nil || *read.CreatedAt != originalCreatedAt {
 		t.Fatalf("metadata after edit = %#v, error = %v", read, err)
+	}
+	description = repository.runner.Run(context.Background(), "-C", target, "config", "--worktree", "--get-all", "gwm.worktree.description")
+	if description.Success() {
+		t.Fatalf("empty description was retained: %q", description.Stdout)
+	}
+	protected = repository.git("-C", target, "config", "--worktree", "--bool", "--get-all", "gwm.worktree.protected")
+	if string(protected.Stdout) != "false\n" {
+		t.Fatalf("protected config after edit = %q", protected.Stdout)
+	}
+	exitCode, stdout, stderr = repository.run("meta", target)
+	if exitCode != 0 || !strings.Contains(stdout, "CREATED_AT\t"+originalCreatedAt) {
+		t.Fatalf("gwm meta display exited %d: %s\n%s", exitCode, stderr, stdout)
 	}
 
 	exitCode, _, stderr = repository.run("remove", target)
@@ -137,6 +173,50 @@ func TestMetadataLifecycleAndNativeBoundaries(t *testing.T) {
 	exitCode, _, _ = repository.run("remove", repository.root)
 	if exitCode != 1 {
 		t.Fatalf("main worktree remove exit = %d, want 1", exitCode)
+	}
+}
+
+func TestCreatedAtNativeBoundaryAndInvalidIsolation(t *testing.T) {
+	repository := newTemporaryRepository(t)
+	repository.initGWM()
+
+	nativeTarget := filepath.Join(repository.base, "native-created")
+	repository.git("-C", repository.root, "worktree", "add", "-b", "native-created", nativeTarget)
+	nativeMetadata, err := meta.Read(context.Background(), repository.runner, nativeTarget)
+	if err != nil || nativeMetadata.CreatedAt != nil || nativeMetadata.CreatedAtInvalid {
+		t.Fatalf("native metadata = %#v, error = %v", nativeMetadata, err)
+	}
+	exitCode, stdout, stderr := repository.run("meta", nativeTarget)
+	if exitCode != 0 || !strings.Contains(stdout, "CREATED_AT\t-") {
+		t.Fatalf("native meta exited %d: %s\n%s", exitCode, stderr, stdout)
+	}
+
+	target := filepath.Join(repository.base, "invalid-created-at")
+	exitCode, _, stderr = repository.run("add", target, "-b", "invalid-created-at")
+	if exitCode != 0 {
+		t.Fatalf("gwm add exited %d: %s", exitCode, stderr)
+	}
+	repository.git("-C", target, "config", "--worktree", "--replace-all", "gwm.worktree.created-at", "not-a-time")
+	metadata, err := meta.Read(context.Background(), repository.runner, target)
+	if err != nil || metadata.CreatedAt != nil || !metadata.CreatedAtInvalid {
+		t.Fatalf("invalid created-at metadata = %#v, error = %v", metadata, err)
+	}
+	exitCode, stdout, stderr = repository.run("list")
+	if exitCode != 0 || !lineForPathContains(stdout, target, "INVALID") {
+		t.Fatalf("invalid created-at list exited %d: %s\n%s", exitCode, stderr, stdout)
+	}
+	exitCode, _, stderr = repository.run("meta", target, "--description", "still editable")
+	if exitCode != 0 {
+		t.Fatalf("meta with invalid created-at exited %d: %s", exitCode, stderr)
+	}
+	repository.git("-C", target, "config", "--worktree", "--add", "gwm.worktree.created-at", "also-invalid")
+	metadata, err = meta.Read(context.Background(), repository.runner, target)
+	if err != nil || !metadata.CreatedAtInvalid {
+		t.Fatalf("duplicate created-at metadata = %#v, error = %v", metadata, err)
+	}
+	exitCode, _, stderr = repository.run("remove", target)
+	if exitCode != 0 {
+		t.Fatalf("remove with invalid created-at exited %d: %s", exitCode, stderr)
 	}
 }
 
@@ -251,11 +331,18 @@ func TestDetachedLockedAndInvalidMetadata(t *testing.T) {
 		t.Fatalf("locked remove exit = %d, want 1", exitCode)
 	}
 	repository.git("-C", repository.root, "worktree", "unlock", target)
-	repository.git("-C", target, "config", "--worktree", "--replace-all", "gwm.metadata", `{"description":null}`)
+	repository.git("-C", target, "config", "--worktree", "--add", "gwm.worktree.description", "first")
+	repository.git("-C", target, "config", "--worktree", "--add", "gwm.worktree.description", "second")
 
 	exitCode, stdout, stderr = repository.run("list")
 	if exitCode != 0 || !lineForPathContains(stdout, target, "INVALID") {
-		t.Fatalf("invalid metadata list exited %d: %s\n%s", exitCode, stderr, stdout)
+		t.Fatalf("duplicate metadata list exited %d: %s\n%s", exitCode, stderr, stdout)
+	}
+	repository.git("-C", target, "config", "--worktree", "--replace-all", "gwm.worktree.description", "valid")
+	repository.git("-C", target, "config", "--worktree", "--replace-all", "gwm.worktree.protected", "not-a-boolean")
+	exitCode, stdout, stderr = repository.run("list")
+	if exitCode != 0 || !lineForPathContains(stdout, target, "INVALID") {
+		t.Fatalf("invalid boolean list exited %d: %s\n%s", exitCode, stderr, stdout)
 	}
 	exitCode, _, _ = repository.run("meta", target, "--protected", "false")
 	if exitCode != 1 {
@@ -272,8 +359,8 @@ func TestGitFailuresDoNotTriggerCleanupOrPostHook(t *testing.T) {
 	repository.initGWM()
 	recorder := &recordingExecutor{}
 	configuredHook := writeHook(t, repository.base, "#!/bin/sh\nexit 0\n")
-	repository.git("-C", repository.root, "config", "--local", "gwm.hook.post-add", configuredHook)
-	repository.git("-C", repository.root, "config", "--local", "gwm.hook.post-remove", configuredHook)
+	repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-add", configuredHook)
+	repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-remove", configuredHook)
 
 	existing := filepath.Join(repository.base, "occupied")
 	if err := os.Mkdir(existing, 0o700); err != nil {
@@ -321,7 +408,7 @@ func TestHookOrderPayloadAndNativeBypass(t *testing.T) {
 	logPath := filepath.Join(repository.base, "hook.log")
 	hookPath := writeHook(t, repository.base, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\t' \"$PWD\" >> %s\ncat >> %s\n", shellQuote(logPath), shellQuote(logPath)))
 	for _, event := range []string{hooks.PreAdd, hooks.PostAdd, hooks.PreRemove, hooks.PostRemove} {
-		repository.git("-C", repository.root, "config", "--local", "gwm.hook."+event, hookPath)
+		repository.git("-C", repository.root, "config", "--local", "gwm.hooks."+event, hookPath)
 	}
 
 	target := filepath.Join(repository.base, "hooked")
@@ -342,17 +429,23 @@ func TestHookOrderPayloadAndNativeBypass(t *testing.T) {
 		if record.CWD != repository.root || record.Payload.Event != wantEvents[index] {
 			t.Fatalf("record %d = %#v", index, record)
 		}
-		if record.Payload.SchemaVersion != 1 || record.Payload.CommonDir == "" || record.Payload.WorktreePath != target {
+		if record.Payload.SchemaVersion != hooks.SchemaVersion || record.Payload.CommonDir == "" || record.Payload.WorktreePath != target {
 			t.Fatalf("incomplete payload: %#v", record.Payload)
 		}
 	}
 	if records[0].Payload.Head != nil || records[0].Payload.Branch != nil {
 		t.Fatalf("pre-add unexpectedly observed target: %#v", records[0].Payload)
 	}
-	if records[1].Payload.Head == nil || records[1].Payload.Branch == nil || records[1].Payload.Metadata == nil {
+	if records[0].Payload.Metadata == nil || records[0].Payload.Metadata.CreatedAt != nil {
+		t.Fatalf("pre-add unexpectedly had created-at: %#v", records[0].Payload)
+	}
+	if records[1].Payload.Head == nil || records[1].Payload.Branch == nil || records[1].Payload.Metadata == nil || records[1].Payload.Metadata.CreatedAt == nil {
 		t.Fatalf("post-add did not observe target: %#v", records[1].Payload)
 	}
-	if records[3].Payload.Metadata == nil || records[3].Payload.Metadata.Description == nil || *records[3].Payload.Metadata.Description != "hook metadata" {
+	if records[2].Payload.Metadata == nil || records[2].Payload.Metadata.CreatedAt == nil || *records[2].Payload.Metadata.CreatedAt != *records[1].Payload.Metadata.CreatedAt {
+		t.Fatalf("pre-remove lost created-at: %#v", records[2].Payload)
+	}
+	if records[3].Payload.Metadata == nil || records[3].Payload.Metadata.Description == nil || *records[3].Payload.Metadata.Description != "hook metadata" || records[3].Payload.Metadata.CreatedAt == nil || *records[3].Payload.Metadata.CreatedAt != *records[1].Payload.Metadata.CreatedAt {
 		t.Fatalf("post-remove lost prior metadata: %#v", records[3].Payload)
 	}
 
@@ -389,7 +482,7 @@ func TestRelativeHookPathResolvesFromMainWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository.git("-C", repository.root, "config", "--local", "gwm.hook.pre-add", relativeHookPath)
+	repository.git("-C", repository.root, "config", "--local", "gwm.hooks.pre-add", relativeHookPath)
 
 	recorder := &recordingExecutor{}
 	var stdout bytes.Buffer
@@ -416,7 +509,7 @@ func TestPreAndPostHookFailures(t *testing.T) {
 		repository := newTemporaryRepository(t)
 		repository.initGWM()
 		failedHook := writeHook(t, repository.base, "#!/bin/sh\nexit 7\n")
-		repository.git("-C", repository.root, "config", "--local", "gwm.hook.pre-add", failedHook)
+		repository.git("-C", repository.root, "config", "--local", "gwm.hooks.pre-add", failedHook)
 		target := filepath.Join(repository.base, "blocked")
 		exitCode, _, _ := repository.run("add", target, "-b", "blocked")
 		if exitCode != 1 {
@@ -437,7 +530,7 @@ func TestPreAndPostHookFailures(t *testing.T) {
 			t.Fatalf("setup add exited %d: %s", exitCode, stderr)
 		}
 		failedHook := writeHook(t, repository.base, "#!/bin/sh\nexit 7\n")
-		repository.git("-C", repository.root, "config", "--local", "gwm.hook.pre-remove", failedHook)
+		repository.git("-C", repository.root, "config", "--local", "gwm.hooks.pre-remove", failedHook)
 		exitCode, _, _ = repository.run("remove", target)
 		if exitCode != 1 {
 			t.Fatalf("pre-remove failure exit = %d, want 1", exitCode)
@@ -451,9 +544,9 @@ func TestPreAndPostHookFailures(t *testing.T) {
 		repository := newTemporaryRepository(t)
 		repository.initGWM()
 		failedHook := writeHook(t, repository.base, "#!/bin/sh\nexit 8\n")
-		repository.git("-C", repository.root, "config", "--local", "gwm.hook.post-add", failedHook)
+		repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-add", failedHook)
 		target := filepath.Join(repository.base, "partial")
-		exitCode, _, stderr := repository.run("add", target, "-b", "partial")
+		exitCode, _, stderr := repository.run("add", target, "-b", "partial", "--description", "preserved")
 		if exitCode != 2 || !strings.Contains(stderr, "git worktree add completed") {
 			t.Fatalf("post failure exit = %d, stderr = %q", exitCode, stderr)
 		}
@@ -461,7 +554,7 @@ func TestPreAndPostHookFailures(t *testing.T) {
 			t.Fatalf("post-hook failure rolled back worktree: %v", err)
 		}
 		read, err := meta.Read(context.Background(), repository.runner, target)
-		if err != nil || read.Invalid != nil || !read.Present {
+		if err != nil || read.Description == nil || *read.Description != "preserved" {
 			t.Fatalf("metadata missing after post-hook failure: %#v, %v", read, err)
 		}
 	})
@@ -475,7 +568,7 @@ func TestPreAndPostHookFailures(t *testing.T) {
 			t.Fatalf("setup add exited %d: %s", exitCode, stderr)
 		}
 		failedHook := writeHook(t, repository.base, "#!/bin/sh\nexit 8\n")
-		repository.git("-C", repository.root, "config", "--local", "gwm.hook.post-remove", failedHook)
+		repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-remove", failedHook)
 		exitCode, _, stderr = repository.run("remove", target)
 		if exitCode != 2 || !strings.Contains(stderr, "git worktree remove completed") {
 			t.Fatalf("post-remove failure exit = %d, stderr = %q", exitCode, stderr)
@@ -522,9 +615,9 @@ func TestMetadataWriteFailureIsPartialAndStillRunsPostAdd(t *testing.T) {
 	recorder := &recordingExecutor{}
 	runner := &failingMetadataRunner{inner: repository.runner}
 	target := filepath.Join(repository.base, "metadata-partial")
-	repository.git("-C", repository.root, "config", "--local", "gwm.hook.post-add", writeHook(t, repository.base, "#!/bin/sh\nexit 0\n"))
-	exitCode, _, stderr := repository.runWith(runner, recorder, "add", target, "-b", "metadata-partial")
-	if exitCode != 2 || !strings.Contains(stderr, "git worktree add completed") {
+	repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-add", writeHook(t, repository.base, "#!/bin/sh\nexit 0\n"))
+	exitCode, _, stderr := repository.runWith(runner, recorder, "add", target, "-b", "metadata-partial", "--description", "written-before-failure")
+	if exitCode != 2 || !strings.Contains(stderr, "git worktree add completed") || !strings.Contains(stderr, "metadata may be partially updated") {
 		t.Fatalf("metadata failure exit = %d, stderr = %q", exitCode, stderr)
 	}
 	if len(recorder.events) != 1 || recorder.events[0] != hooks.PostAdd {
@@ -532,6 +625,34 @@ func TestMetadataWriteFailureIsPartialAndStillRunsPostAdd(t *testing.T) {
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("metadata failure rolled back worktree: %v", err)
+	}
+	description := repository.git("-C", target, "config", "--worktree", "--get-all", "gwm.worktree.description")
+	if string(description.Stdout) != "written-before-failure\n" {
+		t.Fatalf("description write was rolled back: %q", description.Stdout)
+	}
+	protected := repository.runner.Run(context.Background(), "-C", target, "config", "--worktree", "--get-all", "gwm.worktree.protected")
+	if protected.Success() {
+		t.Fatalf("failed protected write unexpectedly persisted: %q", protected.Stdout)
+	}
+}
+
+func TestCreatedAtWriteFailureIsPartialAndStillRunsPostAdd(t *testing.T) {
+	repository := newTemporaryRepository(t)
+	repository.initGWM()
+	recorder := &recordingExecutor{}
+	runner := &failingCreatedAtRunner{inner: repository.runner}
+	target := filepath.Join(repository.base, "created-at-partial")
+	repository.git("-C", repository.root, "config", "--local", "gwm.hooks.post-add", writeHook(t, repository.base, "#!/bin/sh\nexit 0\n"))
+	exitCode, _, stderr := repository.runWith(runner, recorder, "add", target, "-b", "created-at-partial", "--description", "preserved", "--protected")
+	if exitCode != 2 || !strings.Contains(stderr, "git worktree add completed") || !strings.Contains(stderr, "metadata may be partially updated") {
+		t.Fatalf("created-at failure exit = %d, stderr = %q", exitCode, stderr)
+	}
+	metadata, err := meta.Read(context.Background(), repository.runner, target)
+	if err != nil || metadata.Description == nil || *metadata.Description != "preserved" || !metadata.Protected || metadata.CreatedAt != nil {
+		t.Fatalf("metadata after created-at failure = %#v, error = %v", metadata, err)
+	}
+	if len(recorder.payloads) != 1 || recorder.payloads[0].Metadata == nil || recorder.payloads[0].Metadata.CreatedAt != nil {
+		t.Fatalf("post-add payloads = %#v", recorder.payloads)
 	}
 }
 
@@ -542,13 +663,13 @@ func TestHookConfigValidation(t *testing.T) {
 	if err := os.WriteFile(nonExecutable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	repository.git("-C", repository.root, "config", "--local", "--add", "gwm.hook.pre-add", nonExecutable)
+	repository.git("-C", repository.root, "config", "--local", "--add", "gwm.hooks.pre-add", nonExecutable)
 	target := filepath.Join(repository.base, "invalid-hook")
 	exitCode, _, _ := repository.run("add", target, "-b", "invalid-hook")
 	if exitCode != 1 {
 		t.Fatalf("non-executable hook exit = %d, want 1", exitCode)
 	}
-	repository.git("-C", repository.root, "config", "--local", "--add", "gwm.hook.pre-add", nonExecutable)
+	repository.git("-C", repository.root, "config", "--local", "--add", "gwm.hooks.pre-add", nonExecutable)
 	exitCode, _, _ = repository.run("add", target, "-b", "invalid-hook")
 	if exitCode != 1 {
 		t.Fatalf("duplicate hook exit = %d, want 1", exitCode)
@@ -610,19 +731,33 @@ type failingMetadataRunner struct {
 
 func (r *failingMetadataRunner) Run(ctx context.Context, args ...string) gitcli.Result {
 	joined := strings.Join(args, "\x00")
-	if strings.Contains(joined, "config\x00--worktree\x00--replace-all\x00gwm.metadata") {
+	if strings.Contains(joined, "config\x00--worktree\x00--replace-all\x00gwm.worktree.protected") {
 		return gitcli.Result{ExitCode: 9, Err: errors.New("injected metadata write failure")}
 	}
 	return r.inner.Run(ctx, args...)
 }
 
+type failingCreatedAtRunner struct {
+	inner gitcli.Runner
+}
+
+func (r *failingCreatedAtRunner) Run(ctx context.Context, args ...string) gitcli.Result {
+	joined := strings.Join(args, "\x00")
+	if strings.Contains(joined, "config\x00--worktree\x00--replace-all\x00gwm.worktree.created-at") {
+		return gitcli.Result{ExitCode: 9, Err: errors.New("injected created-at write failure")}
+	}
+	return r.inner.Run(ctx, args...)
+}
+
 type recordingExecutor struct {
-	events []string
-	paths  []string
+	events   []string
+	paths    []string
+	payloads []hooks.Payload
 }
 
 func (e *recordingExecutor) Run(_ context.Context, path string, _ string, payload hooks.Payload, _, _ io.Writer) error {
 	e.events = append(e.events, payload.Event)
 	e.paths = append(e.paths, path)
+	e.payloads = append(e.payloads, payload)
 	return nil
 }

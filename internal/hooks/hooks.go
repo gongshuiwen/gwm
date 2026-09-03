@@ -10,15 +10,16 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"gwm/internal/gitcli"
-	"gwm/internal/meta"
+	"github.com/gongshuiwen/gwm/internal/gitcli"
+	"github.com/gongshuiwen/gwm/internal/meta"
 )
 
 const (
-	PreAdd     = "pre-add"
-	PostAdd    = "post-add"
-	PreRemove  = "pre-remove"
-	PostRemove = "post-remove"
+	SchemaVersion = 2
+	PreAdd        = "pre-add"
+	PostAdd       = "post-add"
+	PreRemove     = "pre-remove"
+	PostRemove    = "post-remove"
 )
 
 type Options struct {
@@ -77,7 +78,7 @@ func ConfiguredPath(ctx context.Context, runner gitcli.Runner, mainRoot, event s
 	if !validEvent(event) {
 		return "", false, fmt.Errorf("unknown hook event %q", event)
 	}
-	key := "gwm.hook." + event
+	key := "gwm.hooks." + event
 	values, missing, err := gitcli.ConfigValues(ctx, runner, mainRoot, "--local", key, false)
 	if err != nil {
 		return "", false, err

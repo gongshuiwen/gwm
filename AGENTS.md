@@ -24,8 +24,9 @@
 ## Implementation Scope
 
 - 严格按 `PLAN.md` 的当前阶段实施；一次阶段请求不授权后续阶段。
-- v0.1 只实现 `init`、`list`、`add`、`meta`、`remove`。
-- v0.1 只实现 `pre-add`、`post-add`、`pre-remove`、`post-remove`。
+- v0.2 只实现 `init`、`list`、`add`、`meta`、`remove`。
+- v0.2 只实现 `pre-add`、`post-add`、`pre-remove`、`post-remove`。
+- v0.2 提供 root/subcommand `--help` 和 root `--version`；它们不得发现 repository 或运行 Git/Hook。
 - 不提前增加 DESIGN 明确延期的命令、状态系统或扩展接口。
 - 可观察行为变化必须先更新 `SPEC.md`，产品边界变化必须先更新 `DESIGN.md`。
 
@@ -34,7 +35,7 @@
 - Git 必须使用参数数组调用，不能构造 shell command string。
 - 固定一次命令的 repository context，并清除 Git 重定位和临时 config 注入环境变量。
 - 使用 `git worktree list --porcelain -z` 读取工作树清单。
-- 只能通过 `git config --worktree` 读写 `gwm.metadata`。
+- 只能通过 `git config --worktree` 读写 `gwm.worktree.description`、`gwm.worktree.protected` 和 `gwm.worktree.created-at`；created-at 只由成功的 `gwm add` 写入。
 - 不得直接读取、修改或删除 `<git-common-dir>/worktrees`。
 - Git 返回后必须重新读取 worktree 清单并输出当前状态。
 - 不得为回滚 add 递归删除路径或分支；不得在 remove 后补充递归删除。
@@ -60,13 +61,13 @@
 
 ## External State And Dependencies
 
-- v0.1 运行时只依赖 Go 标准库和系统 Git。
+- v0.2 运行时只依赖 Go 标准库和系统 Git。
 - 未经明确授权，不得安装工具链、提交代码、创建 remote、配置 CI 或发布制品。
 - 新增依赖、网络行为或自动发现/启用 tracked Hook 前必须先更新 `DESIGN.md` 并说明信任与供应链影响。
-- 未确定 canonical module path 和许可证前，不得猜测并公开发布。
+- Canonical repository 固定为 `https://github.com/gongshuiwen/gwm`，module path 固定为 `github.com/gongshuiwen/gwm`；变更两者前必须先更新 `DESIGN.md` 和 `PLAN.md`。
 
 ## Validation
 
-执行 `PLAN.md` 当前阶段列出的验证。文档变更还必须检查链接、围栏、JSON 示例，以及五个命令、两个 metadata 字段、四个 Hook 和两阶段计划的一致性。
+执行 `PLAN.md` 当前阶段列出的验证。文档变更还必须检查链接、围栏、JSON 示例，以及五个业务命令、两个信息 flag、三个 metadata 字段、四个 Hook、Hook schema 2 和四阶段计划的一致性。
 
 无法运行的验证必须报告原因、风险和替代检查，不能表述为通过。
