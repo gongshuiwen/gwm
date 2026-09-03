@@ -1,0 +1,4 @@
+/bin/
+/gwm
+*.test
+coverage.out
