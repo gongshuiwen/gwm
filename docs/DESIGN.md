@@ -1,11 +1,6 @@
 # GWM 设计
 
-| 项目 | 内容 |
-|---|---|
-| 状态 | Accepted，已完成本地实现 |
-| 设计基线 | 3.2（薄包装器） |
-| 适用版本 | Unreleased（待发布） |
-| 最后更新 | 2026-09-03 |
+本文说明 GWM 的产品边界、架构选择、数据所有权和安全原则。命令与配置的完整行为见 [SPEC.md](SPEC.md)。
 
 ## 1. 背景与目标
 
@@ -14,13 +9,13 @@ Git 已经拥有 worktree、branch、HEAD、lock 和删除语义。GWM 的目标
 1. 每个工作树的 `description`、`protected` 和可缺失的 `created-at` metadata。
 2. GWM add/remove 前后的 repository-local 生命周期 Hook。
 
-当前待发布版本提供 `init`、`list`、`add`、`meta`、`remove` 五个命令和 `pre-add`、`post-add`、`pre-remove`、`post-remove` 四个 Hook。`created-at` 只记录 `gwm add` 成功确认工作树已登记的时间，不是 Git 或文件系统提供的通用创建时间。
+GWM 提供 `init`、`list`、`add`、`meta`、`remove` 五个命令和 `pre-add`、`post-add`、`pre-remove`、`post-remove` 四个 Hook。`created-at` 只记录 `gwm add` 成功确认工作树已登记的时间，不是 Git 或文件系统提供的通用创建时间。
 
 CLI 另外提供 `--help`、五个子命令的 `--help` 和 `--version`。这些入口只描述本地程序，不依赖 repository context，也不运行 Git 或 Hook；它们不是新的工作树管理命令。
 
 ## 2. 非目标
 
-以下能力没有当前需求，不进入当前待发布版本：
+以下能力不在 GWM 的产品范围内：
 
 - UUID、接管时间、最后使用时间和历史记录
 - doctor、adopt、edit、show 等独立命令
@@ -53,7 +48,7 @@ cmd/gwm → app → gitcli
                       → gitcli
 ```
 
-`gitcli.Runner` 和 `hooks.Executor` 是仅有的运行边界接口，用于隔离子进程并在测试中注入失败。当前待发布版本不增加通用 repository、event、clock、transaction 或 plugin 抽象。
+`gitcli.Runner` 和 `hooks.Executor` 是仅有的运行边界接口，用于隔离子进程并在测试中注入失败。GWM 不增加通用 repository、event、clock、transaction 或 plugin 抽象。
 
 Help 和 version 在参数解析阶段直接输出；只有五个业务命令进入 repository discovery 和命令编排。源码不预设产品版本号：版本变量默认为空，普通源码构建显示 `unreleased`。发布流水线只接受稳定 SemVer tag，并通过 Go linker 注入该 tag；不增加运行时版本探测机制。
 
@@ -101,7 +96,7 @@ Git 已完成的副作用不会因后续 metadata 或 Hook 失败而回滚。GWM
 
 ## 6. 生命周期 Hook
 
-当前待发布版本的执行顺序固定为：
+生命周期 Hook 的执行顺序固定为：
 
 ```text
 pre-add → git worktree add → metadata write → post-add
@@ -171,17 +166,11 @@ Hook 和系统 Git 可能执行用户本地配置的程序，这是明确的本�
 | Canonical repository | `https://github.com/gongshuiwen/gwm` |
 | Go module | `github.com/gongshuiwen/gwm` |
 
-Canonical repository 和 module path 已固定。版本标签、module version 和预编译制品仍须满足 [PLAN.md](PLAN.md) 的发布门槛后才能发布。
+Canonical repository 和 module path 已固定。版本标签、module version 和预编译制品的发布要求见 [发布指南](RELEASING.md)。
 
 ## 10. 发布自动化
 
-发布自动化属于 repository infrastructure，不进入 GWM 运行时，也不扩大五个业务命令的产品边界。流水线保持单一 tag 驱动流程：
-
-1. 只接受 push 到 GitHub 的稳定 SemVer tag `vMAJOR.MINOR.PATCH`，并将该 tag 作为唯一发布版本。
-2. 使用 `go.mod` 声明的 Go 版本运行 test、race test 和 vet。
-3. 使用 `CGO_ENABLED=0` 和 Go linker flag 注入 tag，交叉构建 Linux/macOS 的 amd64/arm64 二进制，并验证二进制自报版本。
-4. 为每个平台生成包含二进制、README 和 LICENSE 的 `tar.gz`，并生成一个 SHA-256 校验文件。
-5. 仅在前述步骤全部成功后，为已经存在的 tag 创建 GitHub Release 并生成 release notes。
+发布自动化属于 repository infrastructure，不进入 GWM 运行时，也不扩大五个业务命令的产品边界。发布只接受 push 到 GitHub 的稳定 SemVer tag `vMAJOR.MINOR.PATCH`，该 tag 是唯一发布版本。制品格式见 [SPEC 的发布制品](SPEC.md#13-发布制品)，验证和操作步骤见 [发布指南](RELEASING.md)。
 
 信任与供应链边界固定为：
 
@@ -190,10 +179,10 @@ Canonical repository 和 module path 已固定。版本标签、module version �
 - 不引入第三方 release Action、Go 依赖或长期 release credential。
 - Branch、pull request 和手动 dispatch 都不能创建 Release；push release tag 是显式发布授权。
 
-该流程提供 SHA-256 完整性校验，不提供代码签名、provenance attestation 或 SBOM。增加这些能力必须先更新本设计及发布门槛。
+该流程提供 SHA-256 完整性校验，不提供代码签名、provenance attestation 或 SBOM。增加这些能力必须先更新本设计及发布指南中的相应要求。
 
 ## 11. 规范关系
 
-本文拥有产品边界、数据所有权和跨模块设计原则。[SPEC.md](SPEC.md) 可以细化公开行为，但不能扩大产品范围；[PLAN.md](PLAN.md) 只记录实施状态、验收和发布门槛。
+本文拥有产品边界、数据所有权和跨模块设计原则。[SPEC.md](SPEC.md) 可以细化公开行为，但不能扩大产品范围。[贡献指南](../CONTRIBUTING.md) 和 [发布指南](RELEASING.md) 分别定义开发验证与发布流程。
 
-文档导航见 [README.md](README.md)。根目录 [README](../README.md) 用于用户导航，[AGENTS.md](../AGENTS.md) 用于约束自动化开发动作，两者都不创建新的产品行为。
+文档导航见 [README.md](README.md)。根目录 [README](../README.md) 用于用户导航，[AGENTS.md](../AGENTS.md) 用于约束自动化开发动作。计划和归档只记录任务与历史，不创建新的产品行为。

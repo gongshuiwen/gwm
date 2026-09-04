@@ -1,17 +1,10 @@
 # GWM 行为规范
 
-| 项目 | 内容 |
-|---|---|
-| 状态 | Implemented，本地发布前规范 |
-| 适用版本 | Unreleased（待发布） |
-| 设计基线 | 3.2（薄包装器） |
-| 最后更新 | 2026-09-03 |
-
 ## 1. 范围
 
-本文是 GWM 当前待发布版本可观察行为的唯一来源，只细化 [DESIGN.md](DESIGN.md) 已确定的产品边界，不负责实施阶段和项目进度。完整文档导航见 [README.md](README.md)。
+本文是 GWM 可观察行为的唯一来源，只细化 [DESIGN.md](DESIGN.md) 已确定的产品边界。完整文档导航见 [README.md](README.md)。
 
-本文中的“必须”“不得”“只”和“固定”是规范性要求。命令、配置、字段、事件和字面值使用代码格式表示。未在本文定义的行为不属于当前待发布版本的公共能力。
+本文中的“必须”“不得”“只”和“固定”是规范性要求。命令、配置、字段、事件和字面值使用代码格式表示。未在本文定义的行为不属于 GWM 的公共能力。
 
 ## 2. 根命令
 
@@ -41,7 +34,7 @@ gwm [-C <repository>] remove <path> [--force]
 - 相对 repository path 以进程启动目录为基准；相对 worktree path 以 invocation worktree root 为基准。
 - 输入路径和文本必须是有效 UTF-8 且不含 NUL。
 - 未知参数、缺少参数和互斥参数返回 usage error。
-- 当前待发布版本没有 `--json`、交互式确认或配置文件搜索。
+- GWM 没有 `--json`、交互式确认或配置文件搜索。
 
 ## 3. Repository Context
 
@@ -104,7 +97,7 @@ git -C <worktree> config --worktree --unset-all gwm.worktree.protected
 git -C <worktree> config --worktree --unset-all gwm.worktree.created-at
 ```
 
-`gwm meta` 的写入顺序固定为 description、protected：description 为 null 时删除对应键，否则使用一次 `--replace-all`；protected 使用一次 `--replace-all`。`gwm add` 在两者成功后，以一次 `--replace-all` 写入 created-at。三个键不是一个事务，后一步失败不回滚已完成的前一步，错误必须说明 metadata 可能部分更新。每组写入后重读，只有 Git config 写入步骤成功且重读等于 intended value 才成功；删除一个原本缺失的 description 键视为成功的 no-op。当前待发布版本不提供 CAS 或 metadata lock。
+`gwm meta` 的写入顺序固定为 description、protected：description 为 null 时删除对应键，否则使用一次 `--replace-all`；protected 使用一次 `--replace-all`。`gwm add` 在两者成功后，以一次 `--replace-all` 写入 created-at。三个键不是一个事务，后一步失败不回滚已完成的前一步，错误必须说明 metadata 可能部分更新。每组写入后重读，只有 Git config 写入步骤成功且重读等于 intended value 才成功；删除一个原本缺失的 description 键视为成功的 no-op。GWM 不提供 CAS 或 metadata lock。
 
 ## 6. List
 
@@ -134,7 +127,7 @@ Add mode 与原生 Git 的映射固定为：
 | `-b <name>` | `git worktree add -b <name> <path> [<from>]` |
 | `--detach` | `git worktree add --detach <path> [<from>]` |
 
-`-b` 与 `--detach` 互斥；`--from` 省略时不向 Git 注入 start point，保留原生推断行为。当前待发布版本不包装其他 add option；需要其他原生能力时，用户先运行 `git worktree add`，再运行 `gwm meta`。
+`-b` 与 `--detach` 互斥；`--from` 省略时不向 Git 注入 start point，保留原生推断行为。GWM 不包装其他 add option；需要其他原生能力时，用户先运行 `git worktree add`，再运行 `gwm meta`。
 
 执行顺序：
 
@@ -199,7 +192,7 @@ gwm.hooks.post-remove
 - Hook path 的相对解析基准固定为 main worktree；Hook cwd 固定为 invocation worktree root。两者互不影响。
 - Hook stdin 是一份 JSON payload；stdout/stderr 直接继承调用终端。
 - 未配置对应 key 时跳过该 Hook。
-- 当前待发布版本没有 timeout、retry、并行或 Hook 链。
+- GWM 没有 timeout、retry、并行或 Hook 链。
 
 Hook payload 固定为：
 
@@ -257,7 +250,7 @@ Partial 输出必须明确指出 Git 操作已经完成，避免用户误以为�
 
 ## 13. 发布制品
 
-GitHub Actions 发布流水线只由 push 稳定 SemVer tag `vMAJOR.MINOR.PATCH` 触发。源码不保存预设产品版本号；流水线必须把 tag 注入发布二进制，并验证 `gwm --version` 精确输出 `gwm <release-tag>`，否则不得创建 Release。
+发布版本使用稳定 SemVer tag `vMAJOR.MINOR.PATCH`。源码不保存预设产品版本号；正式发布二进制的 `gwm --version` 必须精确输出 `gwm <release-tag>`。发布操作及版本验证见 [发布指南](RELEASING.md)。
 
 每次成功发布包含以下资产，其中 `<version>` 不含前导 `v`：
 
